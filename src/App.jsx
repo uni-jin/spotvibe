@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { auth } from './lib/supabase'
+import { auth, db } from './lib/supabase'
 
 function App() {
   const [currentView, setCurrentView] = useState('home')
@@ -16,6 +16,7 @@ function App() {
   const [postMetadata, setPostMetadata] = useState(null)
   const [showToast, setShowToast] = useState(false)
   const [vibePosts, setVibePosts] = useState([])
+  const [isPosting, setIsPosting] = useState(false) // Post Vibe 업로드 중 상태
   const [mapZoom, setMapZoom] = useState(1) // 1 = 클러스터, 2 = 개별 핀
   const [selectedCluster, setSelectedCluster] = useState(null)
   const [selectedPin, setSelectedPin] = useState(null)
@@ -288,7 +289,7 @@ function App() {
     setPostAdditionalImages(postAdditionalImages.filter((_, i) => i !== index))
   }
 
-  const handlePostVibe = () => {
+  const handlePostVibe = async () => {
     if (!postPlace || !postVibe) {
       alert('Please select a place and vibe status')
       return
@@ -299,44 +300,98 @@ function App() {
       return
     }
 
-    // 모든 이미지 URL 생성
-    const allImages = [
-      URL.createObjectURL(postMainImage),
-      ...postAdditionalImages.map((img) => URL.createObjectURL(img)),
-    ]
+    setIsPosting(true)
 
-    // 추가 사진들의 메타데이터 시뮬레이션 (메인 사진 시간 기준으로 약간씩 다르게)
-    const additionalMetadata = postAdditionalImages.map((_, index) => ({
-      capturedAt: new Date(postMetadata.capturedAt.getTime() + (index + 1) * 60000), // 1분씩 차이
-    }))
+    try {
+      // 1. 이미지 업로드
+      const timestamp = Date.now()
+      const userId = user?.id || 'anonymous'
+      
+      // 메인 이미지 업로드
+      const mainImagePath = `${userId}/${timestamp}_main_${postMainImage.name}`
+      const { data: mainImageData, error: mainImageError } = await db.uploadImage(postMainImage, mainImagePath)
+      
+      if (mainImageError) {
+        throw new Error('Failed to upload main image')
+      }
 
-    // 새 제보 추가
-    const newPost = {
-      id: vibePosts.length + 1,
-      placeId: hotSpots.find((p) => p.name === postPlace)?.id || 1,
-      placeName: postPlace,
-      vibe: postVibe,
-      image: allImages[0], // Main photo
-      images: allImages, // All photos array
-      timestamp: new Date(),
-      user: user?.id || user?.email || 'anonymous', // 사용자 ID 저장
-      userId: user?.id || null, // 사용자 ID (DB 저장용)
-      metadata: {
-        lat: postMetadata.lat,
-        lng: postMetadata.lng,
-        capturedAt: postMetadata.capturedAt,
-        locationName: postMetadata.locationName,
-        vibeStatus: postVibe,
-        additionalMetadata: additionalMetadata,
-      },
+      // 추가 이미지 업로드
+      const additionalImageUrls = []
+      const additionalMetadata = []
+      
+      for (let i = 0; i < postAdditionalImages.length; i++) {
+        const img = postAdditionalImages[i]
+        const imgPath = `${userId}/${timestamp}_additional_${i}_${img.name}`
+        const { data: imgData, error: imgError } = await db.uploadImage(img, imgPath)
+        
+        if (imgError) {
+          console.error('Failed to upload additional image:', imgError)
+          continue // 개별 이미지 실패는 건너뛰고 계속 진행
+        }
+        
+        additionalImageUrls.push(imgData.publicUrl)
+        additionalMetadata.push({
+          capturedAt: new Date(postMetadata.capturedAt.getTime() + (i + 1) * 60000), // 1분씩 차이
+        })
+      }
+
+      // 2. 장소 ID 찾기 (hotSpots에서 찾거나 null)
+      const selectedPlace = hotSpots.find((p) => p.name === postPlace)
+      const placeId = selectedPlace?.id || null
+
+      // 3. Supabase에 포스트 저장
+      const postData = {
+        placeId: placeId,
+        placeName: postPlace,
+        vibe: postVibe,
+        mainImageUrl: mainImageData.publicUrl,
+        additionalImageUrls: additionalImageUrls,
+        metadata: {
+          lat: postMetadata.lat,
+          lng: postMetadata.lng,
+          capturedAt: postMetadata.capturedAt,
+          locationName: postMetadata.locationName,
+          vibeStatus: postVibe,
+          additionalMetadata: additionalMetadata,
+        },
+        userId: user?.id || null,
+      }
+
+      const savedPost = await db.createPost(postData)
+
+      // 4. 로컬 state 업데이트 (새로 저장된 포스트 추가)
+      const newPost = {
+        id: savedPost.id,
+        placeId: savedPost.place_id,
+        placeName: savedPost.place_name,
+        vibe: savedPost.vibe,
+        image: mainImageData.publicUrl,
+        images: [mainImageData.publicUrl, ...additionalImageUrls],
+        timestamp: new Date(savedPost.created_at),
+        user: user?.id || user?.email || 'anonymous',
+        userId: user?.id || null,
+        metadata: {
+          lat: postMetadata.lat,
+          lng: postMetadata.lng,
+          capturedAt: postMetadata.capturedAt,
+          locationName: postMetadata.locationName,
+          vibeStatus: postVibe,
+          additionalMetadata: additionalMetadata,
+        },
+      }
+
+      setVibePosts([newPost, ...vibePosts])
+      handleCloseModal()
+      setShowToast(true)
+      setTimeout(() => {
+        setShowToast(false)
+      }, 3000)
+    } catch (error) {
+      console.error('Error posting vibe:', error)
+      alert(`Failed to post vibe: ${error.message || 'Unknown error'}`)
+    } finally {
+      setIsPosting(false)
     }
-
-    setVibePosts([newPost, ...vibePosts])
-    handleCloseModal()
-    setShowToast(true)
-    setTimeout(() => {
-      setShowToast(false)
-    }, 3000)
   }
 
   const formatCapturedTime = (date) => {
@@ -677,6 +732,7 @@ function App() {
             onClose={handleCloseModal}
             formatCapturedTime={formatCapturedTime}
             formatDate={formatDate}
+            isPosting={isPosting}
           />
         )}
 
@@ -1017,6 +1073,51 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Recent Posts Section */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <h3 className="text-lg font-bold mb-4">Recent Posts</h3>
+                {vibePosts.filter((p) => p.userId === user.id || p.user === user.id).length > 0 ? (
+                  <div className="space-y-4">
+                    {vibePosts
+                      .filter((p) => p.userId === user.id || p.user === user.id)
+                      .slice(0, 5)
+                      .map((post) => {
+                        const vibeInfo = getVibeInfo(post.vibe)
+                        return (
+                          <div
+                            key={post.id}
+                            onClick={() => handlePostClick(post)}
+                            className="bg-gray-800 border border-gray-700 rounded-lg p-4 cursor-pointer hover:border-[#ADFF2F]/50 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              <img
+                                src={post.image}
+                                alt={post.placeName}
+                                className="w-20 h-20 rounded-lg object-cover"
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between mb-1">
+                                  <h4 className="font-semibold text-sm">{post.placeName}</h4>
+                                  <span className="text-xs">{vibeInfo.emoji}</span>
+                                </div>
+                                <p className="text-xs text-gray-400 mb-2">{vibeInfo.label}</p>
+                                <p className="text-xs text-gray-500">
+                                  {post.metadata?.capturedAt 
+                                    ? `${formatDate(post.metadata.capturedAt)} ${formatCapturedTime(post.metadata.capturedAt)}`
+                                    : getTimeAgo(post.timestamp)
+                                  }
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-center py-4">No posts yet</p>
+                )}
+              </div>
             </div>
           ) : (
             <div className="text-center py-12">
@@ -1107,7 +1208,7 @@ function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVib
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm">{vibeInfo.emoji}</span>
                 <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
-              </div>
+      </div>
             </div>
           </div>
         </div>
@@ -1149,7 +1250,7 @@ function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVib
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-              </button>
+        </button>
               <button
                 onClick={handleNextImage}
                 className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/70 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-black/90 transition-colors"
@@ -1221,6 +1322,7 @@ function PostVibeModal({
   onClose,
   formatCapturedTime,
   formatDate,
+  isPosting = false,
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
@@ -1378,8 +1480,8 @@ function PostVibeModal({
               </label>
               <p className="text-xs text-gray-500 mt-1">
                 Set as cover. Location & time will be based on this photo. 📍
-              </p>
-            </div>
+        </p>
+      </div>
             <label className="block">
               <input
                 type="file"
@@ -1512,14 +1614,24 @@ function PostVibeModal({
 
           <button
             onClick={onPost}
-            disabled={!mainImage || !metadata}
-            className={`w-full font-bold py-4 rounded-lg transition-all duration-200 hover:scale-105 shadow-lg ${
-              mainImage && metadata
+            disabled={!mainImage || !metadata || isPosting}
+            className={`w-full font-bold py-4 rounded-lg transition-all duration-200 hover:scale-105 shadow-lg flex items-center justify-center gap-2 ${
+              mainImage && metadata && !isPosting
                 ? 'bg-[#ADFF2F] text-black hover:bg-[#ADFF2F]/90'
                 : 'bg-gray-700 text-gray-400 cursor-not-allowed'
             }`}
           >
-            Post Now
+            {isPosting ? (
+              <>
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Posting...</span>
+              </>
+            ) : (
+              'Post Now'
+            )}
           </button>
         </div>
       </div>

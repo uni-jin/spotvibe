@@ -194,13 +194,31 @@ export const db = {
     return post
   },
 
-  // Upload image to Supabase Storage (나중에 구현)
+  // Upload image to Supabase Storage
   async uploadImage(file, path) {
-    // TODO: Supabase Storage 설정 후 구현
-    // const { data, error } = await supabase.storage
-    //   .from('post-images')
-    //   .upload(path, file)
-    // return { data, error }
-    throw new Error('Image upload not implemented yet. Using local URLs for now.')
+    const { data, error } = await supabase.storage
+      .from('post-images')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false
+      })
+
+    if (error) {
+      console.error('Error uploading image:', error)
+      throw error
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('post-images')
+      .getPublicUrl(data.path)
+
+    return { 
+      data: { 
+        path: data.path,
+        publicUrl: urlData.publicUrl
+      }, 
+      error: null 
+    }
   },
 }

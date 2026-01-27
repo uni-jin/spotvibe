@@ -1,24 +1,27 @@
 # 📍 SpotVibe (스팟바이브)
 > **"지금 이 순간, 가장 핫한 장소의 바이브를 공유하다"**
-> 성수동을 시작으로 전 세계 핫플레이스의 실시간 현황을 공유하는 비주얼 가이드 플랫폼
+> 성수동 팝업스토어 실시간 현황을 공유하는 비주얼 가이드 플랫폼
 
 ## 🚀 프로젝트 비전
-단순한 정보 제공을 넘어, 사용자가 직접 찍은 실시간 사진과 대기 정보를 통해 핫플레이스의 '현재'를 연결합니다. 오로라 앱의 실시간성와 SNS의 감성을 결합하여 외국인 관광객과 트렌드 세터들에게 필수적인 앱이 되는 것을 목표로 합니다.
+단순한 정보 제공을 넘어, 사용자가 직접 찍은 실시간 사진과 대기 정보를 통해 성수동 팝업스토어의 '현재'를 연결합니다. 실시간성과 SNS의 감성을 결합하여 팝업스토어를 찾는 트렌드 세터들에게 필수적인 앱이 되는 것을 목표로 합니다.
 
 ## 🎯 타겟 페르소나
-- **Primary:** 성수동을 방문하는 K-패션/뷰티 관심 외국인 관광객
-- **Secondary:** 실시간 팝업스토어 대기 현황 및 굿즈 재고가 궁금한 국내 MZ세대
+- **Primary:** 성수동 팝업스토어를 방문하는 K-패션/뷰티 관심 MZ세대
+- **Secondary:** 실시간 팝업스토어 대기 현황 및 굿즈 재고가 궁금한 트렌드 세터
 
-## ✨ 핵심 기능 (MVP)
-1. **Region Selector:** 대한민국 주요 핫플 리스트 (성수 우선 오픈, 나머지 'Coming Soon')
-2. **Real-time Live Feed:** 유저 제보 기반의 실시간 장소 사진 및 상태 태그 (No Wait, Busy, Sold out)
-3. **GPS Mission & Rewards:** 매장 방문 및 실시간 제보 시 스탬프 지급 및 리워드 제공
-4. **Interactive Map:** 지도 기반의 실시간 핫스팟 분포 확인
+## ✨ 핵심 기능 (MVP - Phase 1: 팝업스토어 집중)
+1. **Region Selector:** 성수동 지역 선택 (다른 지역은 'Coming Soon')
+2. **Hot Spots Now:** 성수동 팝업스토어 목록 (GPS 기반 거리순 정렬)
+3. **Real-time Live Feed:** 유저 제보 기반의 실시간 팝업스토어 사진 및 상태 태그 (No Wait, Busy, Sold out)
+4. **Post Vibe:** GPS 메타데이터가 포함된 사진과 함께 팝업스토어 현황 제보
+5. **Interactive Map:** 지도 기반의 실시간 팝업스토어 분포 확인
+6. **Admin Dashboard:** 관리자용 팝업스토어 등록/관리 사이트
 
 ## 🗺️ 서비스 로드맵
-- **Phase 1 (Seongsu Focus):** 성수동 지역 집중 운영 및 성공 사례 확보
-- **Phase 2 (Seoul Expansion):** 홍대, 강남, 한남 등 서울 주요 거점 오픈
-- **Phase 3 (Global Scale-up):** 부산, 제주 및 도쿄, 파리 등 해외 핫플레이스 확장
+- **Phase 1 (Pop-up Store Focus):** 성수동 팝업스토어 집중 운영 및 성공 사례 확보
+- **Phase 2 (Seongsu Expansion):** 성수동 일반 핫플레이스 확장 (카페, 레스토랑 등)
+- **Phase 3 (Seoul Expansion):** 홍대, 강남, 한남 등 서울 주요 거점 오픈
+- **Phase 4 (Global Scale-up):** 부산, 제주 및 도쿄, 파리 등 해외 핫플레이스 확장
 
 ## 🛠 Tech Stack
 - **Frontend:** React, Tailwind CSS (VibeCoding/Cursor)
