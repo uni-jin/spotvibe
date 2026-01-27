@@ -1,16 +1,26 @@
-## Hi there 👋
+# 📍 SpotVibe (스팟바이브)
+> **"지금 이 순간, 가장 핫한 장소의 바이브를 공유하다"**
+> 성수동을 시작으로 전 세계 핫플레이스의 실시간 현황을 공유하는 비주얼 가이드 플랫폼
 
-<!--
-**spotvibe/spotvibe** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+## 🚀 프로젝트 비전
+단순한 정보 제공을 넘어, 사용자가 직접 찍은 실시간 사진과 대기 정보를 통해 핫플레이스의 '현재'를 연결합니다. 오로라 앱의 실시간성와 SNS의 감성을 결합하여 외국인 관광객과 트렌드 세터들에게 필수적인 앱이 되는 것을 목표로 합니다.
 
-Here are some ideas to get you started:
+## 🎯 타겟 페르소나
+- **Primary:** 성수동을 방문하는 K-패션/뷰티 관심 외국인 관광객
+- **Secondary:** 실시간 팝업스토어 대기 현황 및 굿즈 재고가 궁금한 국내 MZ세대
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+## ✨ 핵심 기능 (MVP)
+1. **Region Selector:** 대한민국 주요 핫플 리스트 (성수 우선 오픈, 나머지 'Coming Soon')
+2. **Real-time Live Feed:** 유저 제보 기반의 실시간 장소 사진 및 상태 태그 (No Wait, Busy, Sold out)
+3. **GPS Mission & Rewards:** 매장 방문 및 실시간 제보 시 스탬프 지급 및 리워드 제공
+4. **Interactive Map:** 지도 기반의 실시간 핫스팟 분포 확인
+
+## 🗺️ 서비스 로드맵
+- **Phase 1 (Seongsu Focus):** 성수동 지역 집중 운영 및 성공 사례 확보
+- **Phase 2 (Seoul Expansion):** 홍대, 강남, 한남 등 서울 주요 거점 오픈
+- **Phase 3 (Global Scale-up):** 부산, 제주 및 도쿄, 파리 등 해외 핫플레이스 확장
+
+## 🛠 Tech Stack
+- **Frontend:** React, Tailwind CSS (VibeCoding/Cursor)
+- **Design:** Dark Mode, High-end Street Fashion Concept
+>>>>>>> a7262b5 (Initial commit: SpotVibe setup with Vite & Tailwind)
