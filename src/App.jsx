@@ -105,7 +105,42 @@ function App() {
 
   // 사용자 세션 확인 및 인증 상태 관리
   useEffect(() => {
-    // 초기 세션 확인
+    // OAuth 리디렉션 후 hash 처리
+    const handleAuthCallback = async () => {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1))
+      const accessToken = hashParams.get('access_token')
+      const error = hashParams.get('error')
+      
+      if (error) {
+        console.error('OAuth error:', error)
+        // URL에서 hash 제거
+        window.history.replaceState(null, '', window.location.pathname)
+        return
+      }
+      
+      if (accessToken) {
+        // 세션 확인
+        const { session } = await auth.getSession()
+        if (session) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email,
+            name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+            avatar: session.user.user_metadata?.avatar_url || null,
+          })
+          // 로그인 모달이 열려있었다면 닫기
+          if (showLoginModal) {
+            setShowLoginModal(false)
+          }
+        }
+        // URL에서 hash 제거
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+    }
+
+    // 초기 세션 확인 및 OAuth 콜백 처리
+    handleAuthCallback()
+    
     auth.getSession().then(({ session }) => {
       if (session?.user) {
         setUser({
@@ -121,7 +156,9 @@ function App() {
     const {
       data: { subscription },
     } = auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
+      console.log('Auth state changed:', event, session)
+      
+      if (event === 'SIGNED_IN' && session?.user) {
         setUser({
           id: session.user.id,
           email: session.user.email,
@@ -133,8 +170,17 @@ function App() {
           setShowLoginModal(false)
           setIsModalOpen(true)
         }
-      } else {
+        // URL에서 hash 제거
+        window.history.replaceState(null, '', window.location.pathname)
+      } else if (event === 'SIGNED_OUT') {
         setUser(null)
+      } else if (session?.user) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          avatar: session.user.user_metadata?.avatar_url || null,
+        })
       }
     })
 
