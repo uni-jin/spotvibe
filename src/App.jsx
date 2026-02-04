@@ -24,6 +24,11 @@ function App() {
   const [selectedPost, setSelectedPost] = useState(null) // 선택된 포스트 (Detail View)
   const [user, setUser] = useState(null) // 현재 로그인한 사용자
   const [showLoginModal, setShowLoginModal] = useState(false) // 로그인 모달 표시 여부
+  const [hotSpots, setHotSpots] = useState([]) // 팝업스토어 목록 (Supabase에서 로드)
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true) // 포스트 로딩 상태
+  const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
+  const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
+  const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
 
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
@@ -32,75 +37,51 @@ function App() {
     { id: 'Gangnam', name: 'Gangnam', active: false },
   ]
 
-  // Hot Spots (관리자 등록 장소)
-  const hotSpots = [
-    { id: 1, name: '디올 성수', nameEn: 'Dior Seongsu', status: '🔥 Very Busy', wait: '40min+' },
-    { id: 2, name: '아더 성수', nameEn: 'Ader Error', status: '✅ No Wait', wait: 'No Wait' },
-    { id: 3, name: '포인트오브뷰', nameEn: 'Point of View', status: '⏱️ Busy', wait: '20min' },
-    { id: 4, name: '성수동 카페거리', nameEn: 'Seongsu Cafe Street', status: '🟢 Quiet', wait: 'Quiet' },
-  ]
-
-  // 초기 제보 데이터 (Mock)
-  const initialPosts = [
-    {
-      id: 1,
-      placeId: 1,
-      placeName: '디올 성수',
-      vibe: 'verybusy',
-      image: 'https://picsum.photos/400/600?random=1',
-      images: ['https://picsum.photos/400/600?random=1', 'https://picsum.photos/400/600?random=11', 'https://picsum.photos/400/600?random=12'],
-      timestamp: new Date(Date.now() - 5 * 60000), // 5분 전
-      user: 'user123',
-      metadata: {
-        lat: 37.5446,
-        lng: 127.0559,
-        capturedAt: new Date(Date.now() - 5 * 60000),
-        locationName: 'Seongsu-dong 1-ga',
-        additionalMetadata: [
-          { capturedAt: new Date(Date.now() - 5 * 60000 + 60000) },
-          { capturedAt: new Date(Date.now() - 5 * 60000 + 120000) },
-        ],
-      },
-    },
-    {
-      id: 2,
-      placeId: 2,
-      placeName: '아더 성수',
-      vibe: 'nowait',
-      image: 'https://picsum.photos/400/600?random=2',
-      images: ['https://picsum.photos/400/600?random=2'],
-      timestamp: new Date(Date.now() - 12 * 60000), // 12분 전
-      user: 'user456',
-      metadata: {
-        lat: 37.5450,
-        lng: 127.0565,
-        capturedAt: new Date(Date.now() - 12 * 60000),
-        locationName: 'Seongsu-dong 2-ga',
-      },
-    },
-    {
-      id: 3,
-      placeId: 3,
-      placeName: '포인트오브뷰',
-      vibe: 'busy',
-      image: 'https://picsum.photos/400/600?random=3',
-      images: ['https://picsum.photos/400/600?random=3', 'https://picsum.photos/400/600?random=13'],
-      timestamp: new Date(Date.now() - 25 * 60000), // 25분 전
-      user: 'user789',
-      metadata: {
-        lat: 37.5440,
-        lng: 127.0550,
-        capturedAt: new Date(Date.now() - 25 * 60000),
-        locationName: 'Seongsu-dong 1-ga',
-        additionalMetadata: [
-          { capturedAt: new Date(Date.now() - 25 * 60000 + 180000) },
-        ],
-      },
-    },
-  ]
-
+  // Supabase에서 포스트 데이터 로드
   useEffect(() => {
-    setVibePosts(initialPosts)
+    const loadPosts = async () => {
+      try {
+        setIsLoadingPosts(true)
+        setPostsError(null)
+        const posts = await db.getPosts()
+        setVibePosts(posts)
+      } catch (error) {
+        console.error('Error loading posts:', error)
+        setPostsError('Failed to load posts. Please try again later.')
+      } finally {
+        setIsLoadingPosts(false)
+      }
+    }
+
+    loadPosts()
+  }, [])
+
+  // Supabase에서 팝업스토어 목록 로드
+  useEffect(() => {
+    const loadPlaces = async () => {
+      try {
+        setIsLoadingPlaces(true)
+        setPlacesError(null)
+        const places = await db.getPlaces()
+        // places를 hotSpots 형식으로 변환
+        // status는 places 테이블의 wait_time 필드를 사용하거나 기본값 사용
+        const formattedPlaces = places.map((place) => ({
+          id: place.id,
+          name: place.name,
+          nameEn: place.nameEn || place.name,
+          status: place.status || '🟢 Quiet',
+          wait: place.wait || 'Quiet',
+        }))
+        setHotSpots(formattedPlaces)
+      } catch (error) {
+        console.error('Error loading places:', error)
+        setPlacesError('Failed to load places. Please try again later.')
+      } finally {
+        setIsLoadingPlaces(false)
+      }
+    }
+
+    loadPlaces()
   }, [])
 
   // 사용자 세션 확인 및 인증 상태 관리
@@ -243,7 +224,8 @@ function App() {
     }
   }, [showLoginModal])
 
-  const places = ['디올 성수', '아더 성수', '포인트오브뷰', '기타']
+  // Post Vibe 모달에서 사용할 장소 목록 (hotSpots에서 가져오고 '기타' 옵션 추가)
+  const places = [...hotSpots.map(spot => spot.name), '기타']
   const vibeOptions = [
     { id: 'verybusy', label: '🔥 Very Busy', emoji: '🔥', description: '40min+' },
     { id: 'busy', label: '⏱️ Busy', emoji: '⏱️', description: '10-20min' },
@@ -662,27 +644,47 @@ function App() {
         {/* Hot Spots Now Section */}
         <div className="max-w-6xl mx-auto px-4 py-4">
           <h2 className="text-lg font-bold mb-3 text-gray-300">Hot Spots Now</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-            {hotSpots.map((spot) => (
-              <div
-                key={spot.id}
-                onClick={() => handlePlaceClick(spot.id)}
-                className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
-                  spotFilter === spot.id
-                    ? 'border-[#ADFF2F] bg-[#ADFF2F]/10'
-                    : 'border-gray-800 hover:border-[#ADFF2F]/50'
-                }`}
-              >
-                <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
-                <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
-                  <span className="text-xs text-gray-500">•</span>
-                  <span className="text-xs text-gray-400">{spot.wait}</span>
+          {isLoadingPlaces ? (
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 min-w-[200px] animate-pulse">
+                  <div className="h-4 bg-gray-700 rounded mb-2"></div>
+                  <div className="h-3 bg-gray-700 rounded mb-2 w-2/3"></div>
+                  <div className="h-3 bg-gray-700 rounded w-1/2"></div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : placesError ? (
+            <div className="text-center py-8">
+              <p className="text-red-400 text-sm">{placesError}</p>
+            </div>
+          ) : hotSpots.length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {hotSpots.map((spot) => (
+                <div
+                  key={spot.id}
+                  onClick={() => handlePlaceClick(spot.id)}
+                  className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
+                    spotFilter === spot.id
+                      ? 'border-[#ADFF2F] bg-[#ADFF2F]/10'
+                      : 'border-gray-800 hover:border-[#ADFF2F]/50'
+                  }`}
+                >
+                  <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
+                  <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
+                    <span className="text-xs text-gray-500">•</span>
+                    <span className="text-xs text-gray-400">{spot.wait}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-400 text-sm">No pop-up stores available</p>
+            </div>
+          )}
         </div>
 
         {/* Post Detail Modal */}
@@ -699,7 +701,29 @@ function App() {
         {/* Live Vibe Stream Section - 2열 격자 */}
         <div className="max-w-6xl mx-auto px-4 py-4">
           <h2 className="text-lg font-bold mb-3 text-gray-300">Live Vibe Stream</h2>
-          {filteredPosts.length > 0 ? (
+          {isLoadingPosts ? (
+            <div className="grid grid-cols-2 gap-3">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden animate-pulse">
+                  <div className="h-64 bg-gray-700"></div>
+                  <div className="p-3 space-y-2">
+                    <div className="h-4 bg-gray-700 rounded w-1/3"></div>
+                    <div className="h-3 bg-gray-700 rounded w-1/2"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : postsError ? (
+            <div className="text-center py-12">
+              <p className="text-red-400 text-sm mb-2">{postsError}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+              >
+                Retry
+              </button>
+            </div>
+          ) : filteredPosts.length > 0 ? (
             <div className="grid grid-cols-2 gap-3">
               {filteredPosts.map((post, index) => {
                 const vibeInfo = getVibeInfo(post.vibe)
