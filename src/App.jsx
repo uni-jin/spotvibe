@@ -323,23 +323,49 @@ function App() {
   // 실제 EXIF 메타데이터 검증
   const validateImageMetadata = (file) => {
     return new Promise((resolve) => {
-      // 타임아웃 설정 (5초)
+      console.log('Starting EXIF metadata validation for file:', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: new Date(file.lastModified)
+      })
+      
+      // 타임아웃 설정 (10초로 증가)
       const timeout = setTimeout(() => {
-        console.error('EXIF data reading timeout')
+        console.error('EXIF data reading timeout after 10 seconds')
         alert('Failed to read photo metadata. The photo may not contain GPS information. Please check your GPS settings and upload a photo taken with GPS enabled.')
         resolve(null)
-      }, 5000)
+      }, 10000)
 
       try {
+        console.log('Calling EXIF.getData...')
         EXIF.getData(file, function() {
           clearTimeout(timeout)
+          console.log('EXIF.getData callback called')
           
           try {
+            // 모든 EXIF 태그 확인 (디버깅용)
+            const allTags = EXIF.getAllTags(this)
+            console.log('All EXIF tags found:', Object.keys(allTags).length, 'tags')
+            
             // GPS 정보 추출
             const lat = EXIF.getTag(this, 'GPSLatitude')
             const latRef = EXIF.getTag(this, 'GPSLatitudeRef')
             const lng = EXIF.getTag(this, 'GPSLongitude')
             const lngRef = EXIF.getTag(this, 'GPSLongitudeRef')
+
+            console.log('GPS data extracted:', {
+              lat,
+              latRef,
+              lng,
+              lngRef,
+              latType: typeof lat,
+              lngType: typeof lng,
+              latIsArray: Array.isArray(lat),
+              lngIsArray: Array.isArray(lng),
+              latValue: lat,
+              lngValue: lng
+            })
 
             // 촬영 시간 추출
             const dateTimeOriginal = EXIF.getTag(this, 'DateTimeOriginal')
@@ -347,6 +373,16 @@ function App() {
 
             // GPS 정보가 없으면 실패
             if (!lat || !lng) {
+              console.warn('GPS information not found in EXIF data')
+              console.log('Available GPS-related tags:', {
+                GPSLatitude: lat,
+                GPSLatitudeRef: latRef,
+                GPSLongitude: lng,
+                GPSLongitudeRef: lngRef,
+                GPSInfo: EXIF.getTag(this, 'GPSInfo'),
+                GPSVersionID: EXIF.getTag(this, 'GPSVersionID')
+              })
+              console.log('All available EXIF tags:', Object.keys(allTags))
               alert('Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
               resolve(null)
               return
@@ -354,7 +390,16 @@ function App() {
 
             // GPS 좌표 변환 (도분초 형식 -> 십진수)
             const convertDMSToDD = (dms, ref) => {
-              if (!dms || !Array.isArray(dms) || dms.length < 3) {
+              if (!dms) {
+                console.warn('DMS data is null or undefined:', dms)
+                return null
+              }
+              if (!Array.isArray(dms)) {
+                console.warn('DMS data is not an array:', dms, typeof dms)
+                return null
+              }
+              if (dms.length < 3) {
+                console.warn('DMS array has insufficient elements:', dms, 'length:', dms.length)
                 return null
               }
               let dd = dms[0] + dms[1] / 60 + dms[2] / (60 * 60)
@@ -367,8 +412,25 @@ function App() {
             const latitude = convertDMSToDD(lat, latRef)
             const longitude = convertDMSToDD(lng, lngRef)
 
+            console.log('Converted GPS coordinates:', {
+              latitude,
+              longitude,
+              latValid: latitude !== null && !isNaN(latitude),
+              lngValid: longitude !== null && !isNaN(longitude),
+              originalLat: lat,
+              originalLng: lng
+            })
+
             // GPS 좌표 변환 실패 체크
             if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
+              console.error('Invalid GPS coordinates after conversion:', {
+                latitude,
+                longitude,
+                lat,
+                lng,
+                latRef,
+                lngRef
+              })
               alert('Photo does not contain valid location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
               resolve(null)
               return
@@ -403,16 +465,19 @@ function App() {
               locationName: locationName,
             }
 
+            console.log('Metadata successfully extracted:', metadata)
             resolve(metadata)
           } catch (error) {
             console.error('Error processing EXIF data:', error)
+            console.error('Error stack:', error.stack)
             alert('Failed to read photo metadata. Please try another photo.')
             resolve(null)
           }
         })
       } catch (error) {
         clearTimeout(timeout)
-        console.error('Error reading EXIF data:', error)
+        console.error('Error calling EXIF.getData:', error)
+        console.error('Error stack:', error.stack)
         alert('Failed to read photo metadata. The photo may not be a valid image file or may not contain GPS information.')
         resolve(null)
       }
