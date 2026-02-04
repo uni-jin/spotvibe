@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import EXIF from 'exif-js'
+import imageCompression from 'browser-image-compression'
 import { auth, db } from './lib/supabase'
 
 function App() {
@@ -423,6 +424,31 @@ function App() {
     setPostAdditionalImages(postAdditionalImages.filter((_, i) => i !== index))
   }
 
+  // 이미지 압축 함수
+  const compressImage = async (file) => {
+    const options = {
+      maxSizeMB: 0.5, // 최대 파일 크기 500KB
+      maxWidthOrHeight: 1200, // 최대 너비/높이 1200px
+      useWebWorker: true, // 웹 워커 사용 (성능 향상)
+      fileType: 'image/jpeg', // JPEG 형식으로 변환
+      initialQuality: 0.85, // 초기 품질 85%
+    }
+
+    try {
+      const compressedFile = await imageCompression(file, options)
+      console.log('Image compressed:', {
+        original: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+        compressed: (compressedFile.size / 1024 / 1024).toFixed(2) + ' MB',
+        reduction: ((1 - compressedFile.size / file.size) * 100).toFixed(1) + '%'
+      })
+      return compressedFile
+    } catch (error) {
+      console.error('Error compressing image:', error)
+      // 압축 실패 시 원본 파일 반환
+      return file
+    }
+  }
+
   const handlePostVibe = async () => {
     if (!postPlace || !postVibe) {
       alert('Please select a place and vibe status')
@@ -437,26 +463,29 @@ function App() {
     setIsPosting(true)
 
     try {
-      // 1. 이미지 업로드
+      // 1. 이미지 압축 및 업로드
       const timestamp = Date.now()
       const userId = user?.id || 'anonymous'
       
-      // 메인 이미지 업로드
-      const mainImagePath = `${userId}/${timestamp}_main_${postMainImage.name}`
-      const { data: mainImageData, error: mainImageError } = await db.uploadImage(postMainImage, mainImagePath)
+      // 메인 이미지 압축
+      const compressedMainImage = await compressImage(postMainImage)
+      const mainImagePath = `${userId}/${timestamp}_main_${compressedMainImage.name.replace(/\.[^/.]+$/, '.jpg')}`
+      const { data: mainImageData, error: mainImageError } = await db.uploadImage(compressedMainImage, mainImagePath)
       
       if (mainImageError) {
         throw new Error('Failed to upload main image')
       }
 
-      // 추가 이미지 업로드
+      // 추가 이미지 압축 및 업로드
       const additionalImageUrls = []
       const additionalMetadata = []
       
       for (let i = 0; i < postAdditionalImages.length; i++) {
         const img = postAdditionalImages[i]
-        const imgPath = `${userId}/${timestamp}_additional_${i}_${img.name}`
-        const { data: imgData, error: imgError } = await db.uploadImage(img, imgPath)
+        // 추가 이미지 압축
+        const compressedImg = await compressImage(img)
+        const imgPath = `${userId}/${timestamp}_additional_${i}_${compressedImg.name.replace(/\.[^/.]+$/, '.jpg')}`
+        const { data: imgData, error: imgError } = await db.uploadImage(compressedImg, imgPath)
         
         if (imgError) {
           console.error('Failed to upload additional image:', imgError)

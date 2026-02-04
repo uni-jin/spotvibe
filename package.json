@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.93.1",
     "@tailwindcss/vite": "^4.1.18",
+    "browser-image-compression": "^2.0.2",
     "exif-js": "^2.3.0",
     "leaflet": "^1.9.4",
     "react": "^19.2.0",
