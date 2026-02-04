@@ -105,6 +105,41 @@ function App() {
 
   // 사용자 세션 확인 및 인증 상태 관리
   useEffect(() => {
+    // 세션에서 사용자 정보 추출하는 헬퍼 함수
+    const extractUserFromSession = (session) => {
+      if (!session?.user) return null
+      return {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+        avatar: session.user.user_metadata?.avatar_url || null,
+      }
+    }
+
+    // 세션 확인 및 사용자 상태 업데이트
+    const checkSession = async () => {
+      try {
+        const { session, error } = await auth.getSession()
+        if (error) {
+          console.error('Session check error:', error)
+          return
+        }
+        
+        if (session?.user) {
+          const userData = extractUserFromSession(session)
+          if (userData) {
+            setUser(userData)
+            console.log('User session found:', userData)
+          }
+        } else {
+          console.log('No active session')
+          setUser(null)
+        }
+      } catch (error) {
+        console.error('Error checking session:', error)
+      }
+    }
+
     // OAuth 리디렉션 후 hash 처리
     const handleAuthCallback = async () => {
       const hashParams = new URLSearchParams(window.location.hash.substring(1))
@@ -113,74 +148,69 @@ function App() {
       
       if (error) {
         console.error('OAuth error:', error)
-        // URL에서 hash 제거
         window.history.replaceState(null, '', window.location.pathname)
         return
       }
       
-      if (accessToken) {
+      // hash에 access_token이 있거나, 리디렉션 직후라면 세션 확인
+      if (accessToken || window.location.hash) {
+        // Supabase가 세션을 설정할 시간을 주기 위해 약간 대기
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         // 세션 확인
-        const { session } = await auth.getSession()
-        if (session) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-            avatar: session.user.user_metadata?.avatar_url || null,
-          })
-          // 로그인 모달이 열려있었다면 닫기
-          if (showLoginModal) {
-            setShowLoginModal(false)
-          }
-        }
+        await checkSession()
+        
         // URL에서 hash 제거
-        window.history.replaceState(null, '', window.location.pathname)
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname)
+        }
       }
     }
 
     // 초기 세션 확인 및 OAuth 콜백 처리
     handleAuthCallback()
     
-    auth.getSession().then(({ session }) => {
-      if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar: session.user.user_metadata?.avatar_url || null,
-        })
-      }
-    })
+    // 추가로 세션 확인 (리디렉션 후 약간의 지연을 두고)
+    setTimeout(() => {
+      checkSession()
+    }, 500)
 
     // 인증 상태 변경 리스너
     const {
       data: { subscription },
-    } = auth.onAuthStateChange((event, session) => {
+    } = auth.onAuthStateChange(async (event, session) => {
       console.log('Auth state changed:', event, session)
       
-      if (event === 'SIGNED_IN' && session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar: session.user.user_metadata?.avatar_url || null,
-        })
-        // 로그인 성공 시 로그인 모달 닫고 Post Vibe 모달 열기
-        if (showLoginModal) {
-          setShowLoginModal(false)
-          setIsModalOpen(true)
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          const userData = extractUserFromSession(session)
+          if (userData) {
+            setUser(userData)
+            console.log('User signed in:', userData)
+            
+            // 로그인 성공 시 로그인 모달 닫고 Post Vibe 모달 열기
+            if (showLoginModal) {
+              setShowLoginModal(false)
+              setIsModalOpen(true)
+            }
+          }
         }
+        
         // URL에서 hash 제거
-        window.history.replaceState(null, '', window.location.pathname)
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname)
+        }
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
+        console.log('User signed out')
       } else if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar: session.user.user_metadata?.avatar_url || null,
-        })
+        // 기타 이벤트에서도 세션이 있으면 사용자 정보 업데이트
+        const userData = extractUserFromSession(session)
+        if (userData) {
+          setUser(userData)
+        }
+      } else {
+        setUser(null)
       }
     })
 
