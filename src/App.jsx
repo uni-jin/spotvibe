@@ -145,9 +145,33 @@ function App() {
       const hashParams = new URLSearchParams(window.location.hash.substring(1))
       const accessToken = hashParams.get('access_token')
       const error = hashParams.get('error')
+      const errorDescription = hashParams.get('error_description')
+      const errorCode = hashParams.get('error_code')
+      
+      // 모든 hash 파라미터 로그 (디버깅용)
+      if (window.location.hash) {
+        console.log('OAuth callback hash params:', {
+          hash: window.location.hash,
+          accessToken: accessToken ? 'present' : 'missing',
+          error: error || 'none',
+          errorDescription: errorDescription || 'none',
+          errorCode: errorCode || 'none',
+          allParams: Object.fromEntries(hashParams.entries())
+        })
+      }
       
       if (error) {
-        console.error('OAuth error:', error)
+        console.error('OAuth error details:', {
+          error,
+          errorDescription,
+          errorCode,
+          fullHash: window.location.hash,
+          currentUrl: window.location.href
+        })
+        
+        // 사용자에게 친화적인 에러 메시지 표시
+        alert(`로그인 오류가 발생했습니다.\n\n오류: ${error}\n${errorDescription ? `상세: ${errorDescription}` : ''}\n\n콘솔을 확인하여 자세한 정보를 확인하세요.`)
+        
         window.history.replaceState(null, '', window.location.pathname)
         return
       }

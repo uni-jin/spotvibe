@@ -13,16 +13,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 export const auth = {
   // Sign in with Google
   async signInWithGoogle() {
+    // 현재 URL에서 hash와 query 제거한 깨끗한 URL 사용
+    const redirectTo = `${window.location.origin}${window.location.pathname}`
+    
+    console.log('Initiating Google OAuth with redirectTo:', redirectTo)
+    
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}${window.location.pathname}`,
+        redirectTo: redirectTo,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
         },
       },
     })
+    
+    if (error) {
+      console.error('OAuth sign-in error:', error)
+    } else {
+      console.log('OAuth sign-in initiated:', data)
+    }
+    
     return { data, error }
   },
 
