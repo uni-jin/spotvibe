@@ -1610,7 +1610,6 @@ function PostVibeModal({
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"
                 onChange={onMainImageSelect}
                 className="hidden"
               />
