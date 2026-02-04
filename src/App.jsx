@@ -323,73 +323,99 @@ function App() {
   // 실제 EXIF 메타데이터 검증
   const validateImageMetadata = (file) => {
     return new Promise((resolve) => {
-      EXIF.getData(file, function() {
-        try {
-          // GPS 정보 추출
-          const lat = EXIF.getTag(this, 'GPSLatitude')
-          const latRef = EXIF.getTag(this, 'GPSLatitudeRef')
-          const lng = EXIF.getTag(this, 'GPSLongitude')
-          const lngRef = EXIF.getTag(this, 'GPSLongitudeRef')
+      // 타임아웃 설정 (5초)
+      const timeout = setTimeout(() => {
+        console.error('EXIF data reading timeout')
+        alert('Failed to read photo metadata. The photo may not contain GPS information. Please check your GPS settings and upload a photo taken with GPS enabled.')
+        resolve(null)
+      }, 5000)
 
-          // 촬영 시간 추출
-          const dateTimeOriginal = EXIF.getTag(this, 'DateTimeOriginal')
-          const dateTime = EXIF.getTag(this, 'DateTime')
+      try {
+        EXIF.getData(file, function() {
+          clearTimeout(timeout)
+          
+          try {
+            // GPS 정보 추출
+            const lat = EXIF.getTag(this, 'GPSLatitude')
+            const latRef = EXIF.getTag(this, 'GPSLatitudeRef')
+            const lng = EXIF.getTag(this, 'GPSLongitude')
+            const lngRef = EXIF.getTag(this, 'GPSLongitudeRef')
 
-          // GPS 정보가 없으면 실패
-          if (!lat || !lng) {
-            alert('Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
-            resolve(null)
-            return
-          }
+            // 촬영 시간 추출
+            const dateTimeOriginal = EXIF.getTag(this, 'DateTimeOriginal')
+            const dateTime = EXIF.getTag(this, 'DateTime')
 
-          // GPS 좌표 변환 (도분초 형식 -> 십진수)
-          const convertDMSToDD = (dms, ref) => {
-            let dd = dms[0] + dms[1] / 60 + dms[2] / (60 * 60)
-            if (ref === 'S' || ref === 'W') {
-              dd = dd * -1
+            // GPS 정보가 없으면 실패
+            if (!lat || !lng) {
+              alert('Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
+              resolve(null)
+              return
             }
-            return dd
+
+            // GPS 좌표 변환 (도분초 형식 -> 십진수)
+            const convertDMSToDD = (dms, ref) => {
+              if (!dms || !Array.isArray(dms) || dms.length < 3) {
+                return null
+              }
+              let dd = dms[0] + dms[1] / 60 + dms[2] / (60 * 60)
+              if (ref === 'S' || ref === 'W') {
+                dd = dd * -1
+              }
+              return dd
+            }
+
+            const latitude = convertDMSToDD(lat, latRef)
+            const longitude = convertDMSToDD(lng, lngRef)
+
+            // GPS 좌표 변환 실패 체크
+            if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
+              alert('Photo does not contain valid location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
+              resolve(null)
+              return
+            }
+
+            // 촬영 시간 파싱
+            let capturedAt = null
+            if (dateTimeOriginal) {
+              // EXIF DateTimeOriginal 형식: "YYYY:MM:DD HH:mm:ss"
+              const dateStr = dateTimeOriginal.replace(/(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace(' ', 'T')
+              capturedAt = new Date(dateStr)
+            } else if (dateTime) {
+              const dateStr = dateTime.replace(/(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace(' ', 'T')
+              capturedAt = new Date(dateStr)
+            } else {
+              // EXIF에 촬영 시간이 없으면 파일 수정 시간 사용
+              capturedAt = new Date(file.lastModified)
+            }
+
+            // 촬영 시간이 유효하지 않으면 파일 수정 시간 사용
+            if (isNaN(capturedAt.getTime())) {
+              capturedAt = new Date(file.lastModified)
+            }
+
+            // 위치 이름 (간단한 좌표 기반)
+            const locationName = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}`
+
+            const metadata = {
+              lat: latitude,
+              lng: longitude,
+              capturedAt: capturedAt,
+              locationName: locationName,
+            }
+
+            resolve(metadata)
+          } catch (error) {
+            console.error('Error processing EXIF data:', error)
+            alert('Failed to read photo metadata. Please try another photo.')
+            resolve(null)
           }
-
-          const latitude = convertDMSToDD(lat, latRef)
-          const longitude = convertDMSToDD(lng, lngRef)
-
-          // 촬영 시간 파싱
-          let capturedAt = null
-          if (dateTimeOriginal) {
-            // EXIF DateTimeOriginal 형식: "YYYY:MM:DD HH:mm:ss"
-            const dateStr = dateTimeOriginal.replace(/:/g, '-', 2).replace(' ', 'T')
-            capturedAt = new Date(dateStr)
-          } else if (dateTime) {
-            const dateStr = dateTime.replace(/:/g, '-', 2).replace(' ', 'T')
-            capturedAt = new Date(dateStr)
-          } else {
-            // EXIF에 촬영 시간이 없으면 파일 수정 시간 사용
-            capturedAt = new Date(file.lastModified)
-          }
-
-          // 촬영 시간이 유효하지 않으면 파일 수정 시간 사용
-          if (isNaN(capturedAt.getTime())) {
-            capturedAt = new Date(file.lastModified)
-          }
-
-          // 위치 이름 (간단한 좌표 기반)
-          const locationName = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}`
-
-          const metadata = {
-            lat: latitude,
-            lng: longitude,
-            capturedAt: capturedAt,
-            locationName: locationName,
-          }
-
-          resolve(metadata)
-        } catch (error) {
-          console.error('Error reading EXIF data:', error)
-          alert('Failed to read photo metadata. Please try another photo.')
-          resolve(null)
-        }
-      })
+        })
+      } catch (error) {
+        clearTimeout(timeout)
+        console.error('Error reading EXIF data:', error)
+        alert('Failed to read photo metadata. The photo may not be a valid image file or may not contain GPS information.')
+        resolve(null)
+      }
     })
   }
 
