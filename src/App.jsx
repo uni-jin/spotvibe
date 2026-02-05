@@ -330,26 +330,90 @@ function App() {
     })
 
     try {
-      // exifr로 필요한 정보만 파싱
-      const result = await exifr.parse(file, ['latitude', 'longitude', 'DateTimeOriginal'])
-      console.log('exifr.parse result:', result)
+      // exifr로 전체 EXIF 데이터 파싱 (GPS 포함)
+      // 옵션 1: GPS 데이터만 파싱
+      const gpsResult = await exifr.gps(file)
+      console.log('exifr.gps() result:', gpsResult)
+      
+      // 옵션 2: 전체 EXIF 데이터 파싱 (디버깅용)
+      const fullResult = await exifr.parse(file)
+      console.log('exifr.parse() full result:', fullResult)
+      console.log('Full result keys:', Object.keys(fullResult || {}))
+      
+      // GPS 정보 추출 (여러 방법 시도)
+      let latitude = null
+      let longitude = null
+      
+      // 방법 1: gps() 결과에서
+      if (gpsResult && gpsResult.latitude != null && gpsResult.longitude != null) {
+        latitude = gpsResult.latitude
+        longitude = gpsResult.longitude
+        console.log('GPS found via exifr.gps():', { latitude, longitude })
+      }
+      // 방법 2: parse() 결과에서
+      else if (fullResult) {
+        if (fullResult.latitude != null && fullResult.longitude != null) {
+          latitude = fullResult.latitude
+          longitude = fullResult.longitude
+          console.log('GPS found via exifr.parse() - direct:', { latitude, longitude })
+        }
+        // 방법 3: GPS 객체에서
+        else if (fullResult.GPSLatitude != null && fullResult.GPSLongitude != null) {
+          // DMS 형식일 수 있음
+          const latDMS = fullResult.GPSLatitude
+          const latRef = fullResult.GPSLatitudeRef
+          const lngDMS = fullResult.GPSLongitude
+          const lngRef = fullResult.GPSLongitudeRef
+          
+          console.log('GPS found in GPS object (DMS format):', {
+            GPSLatitude: latDMS,
+            GPSLatitudeRef: latRef,
+            GPSLongitude: lngDMS,
+            GPSLongitudeRef: lngRef
+          })
+          
+          // DMS를 십진수로 변환
+          const convertDMSToDD = (dms, ref) => {
+            if (!dms || !Array.isArray(dms) || dms.length < 3) return null
+            let dd = dms[0] + dms[1] / 60 + dms[2] / (60 * 60)
+            if (ref === 'S' || ref === 'W') dd = dd * -1
+            return dd
+          }
+          
+          latitude = convertDMSToDD(latDMS, latRef)
+          longitude = convertDMSToDD(lngDMS, lngRef)
+          
+          if (latitude != null && longitude != null) {
+            console.log('GPS converted from DMS:', { latitude, longitude })
+          }
+        }
+      }
 
       // GPS 정보가 없으면 실패
-      if (!result || result.latitude == null || result.longitude == null) {
+      if (latitude == null || longitude == null) {
+        console.warn('GPS information not found in any format')
+        console.log('Available data:', {
+          gpsResult,
+          fullResultKeys: Object.keys(fullResult || {}),
+          hasGPSLatitude: fullResult?.GPSLatitude != null,
+          hasGPSLongitude: fullResult?.GPSLongitude != null,
+          hasLatitude: fullResult?.latitude != null,
+          hasLongitude: fullResult?.longitude != null,
+        })
         alert(
           'Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.'
         )
         return null
       }
 
-      const latitude = result.latitude
-      const longitude = result.longitude
-
       // 촬영 시간
       let capturedAt = null
-      if (result.DateTimeOriginal) {
-        capturedAt = new Date(result.DateTimeOriginal)
-        console.log('Using DateTimeOriginal from exifr:', result.DateTimeOriginal, '->', capturedAt)
+      if (fullResult?.DateTimeOriginal) {
+        capturedAt = new Date(fullResult.DateTimeOriginal)
+        console.log('Using DateTimeOriginal from exifr:', fullResult.DateTimeOriginal, '->', capturedAt)
+      } else if (fullResult?.DateTime) {
+        capturedAt = new Date(fullResult.DateTime)
+        console.log('Using DateTime from exifr:', fullResult.DateTime, '->', capturedAt)
       } else {
         capturedAt = new Date(file.lastModified)
         console.log('Using file.lastModified as capturedAt:', capturedAt)
@@ -372,6 +436,7 @@ function App() {
       return metadata
     } catch (error) {
       console.error('Error reading EXIF data with exifr:', error)
+      console.error('Error stack:', error.stack)
       alert(
         'Failed to read photo metadata. The photo may not be a valid image file or may not contain GPS information.'
       )
