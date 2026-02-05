@@ -1016,7 +1016,7 @@ function App() {
                   <div
                     key={post.id}
                     onClick={() => handlePostClick(post)}
-                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col ${
+                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col h-full ${
                       spotFilter === post.placeId ? 'ring-2 ring-[#ADFF2F]/50' : ''
                     }`}
                   >
@@ -1049,7 +1049,7 @@ function App() {
                     </div>
 
                     {/* Info Section */}
-                    <div className="p-3 space-y-2">
+                    <div className="p-3 space-y-2 flex-shrink-0">
                       {/* Place Name */}
                       <button
                         onClick={(e) => {
