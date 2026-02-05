@@ -13,6 +13,7 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [postPlace, setPostPlace] = useState('')
   const [postVibe, setPostVibe] = useState('')
+  const [postDescription, setPostDescription] = useState('')
   const [postMainImage, setPostMainImage] = useState(null)
   const [postAdditionalImages, setPostAdditionalImages] = useState([])
   const [postMetadata, setPostMetadata] = useState(null)
@@ -31,6 +32,7 @@ function App() {
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
+  const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
 
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
@@ -292,6 +294,33 @@ function App() {
     }
   }
 
+  // 좋아요 토글 함수
+  const handleToggleLike = async (postId, e) => {
+    e?.stopPropagation() // 이벤트 전파 방지
+    
+    if (!user?.id) {
+      setShowLoginModal(true)
+      return
+    }
+
+    try {
+      const result = await db.togglePostLike(postId, user.id)
+      const newCount = await db.getPostLikeCount(postId)
+      
+      // 로컬 state 업데이트
+      setPostLikes(prev => ({
+        ...prev,
+        [postId]: {
+          count: newCount,
+          liked: result.liked
+        }
+      }))
+    } catch (error) {
+      console.error('Error toggling like:', error)
+      alert('Failed to update like. Please try again.')
+    }
+  }
+
   const handleClearFilter = () => {
     setSpotFilter(null)
   }
@@ -334,6 +363,7 @@ function App() {
     setIsModalOpen(false)
     setPostPlace('')
     setPostVibe('')
+    setPostDescription('')
     setPostMainImage(null)
     setPostAdditionalImages([])
     setPostMetadata(null)
@@ -577,6 +607,7 @@ function App() {
         placeId: placeId,
         placeName: postPlace,
         vibe: postVibe,
+        description: postDescription.trim() || null,
         mainImageUrl: mainImageData.publicUrl,
         additionalImageUrls: additionalImageUrls,
         metadata: {
@@ -598,6 +629,7 @@ function App() {
         placeId: savedPost.place_id,
         placeName: savedPost.place_name,
         vibe: savedPost.vibe,
+        description: savedPost.description || null,
         image: mainImageData.publicUrl,
         images: [mainImageData.publicUrl, ...additionalImageUrls],
         timestamp: new Date(savedPost.created_at),
@@ -865,9 +897,6 @@ function App() {
             <div className="grid grid-cols-2 gap-3">
               {filteredPosts.map((post, index) => {
                 const vibeInfo = getVibeInfo(post.vibe)
-                // 핀터레스트 스타일: 인덱스 기반으로 높이 변형 (실제로는 이미지 비율에 따라)
-                const heightVariants = ['h-56', 'h-72', 'h-64', 'h-80', 'h-60', 'h-76']
-                const imageHeight = heightVariants[index % heightVariants.length]
                 
                 // Get main photo (first image) and count additional photos
                 const mainImage = post.images?.[0] || post.image
@@ -882,7 +911,7 @@ function App() {
                     }`}
                   >
                     {/* Image */}
-                    <div className={`relative w-full ${imageHeight} overflow-hidden`}>
+                    <div className="relative w-full aspect-square overflow-hidden">
                       <img
                         src={mainImage}
                         alt={post.placeName}
@@ -935,6 +964,27 @@ function App() {
                           <span>Captured at {formatCapturedTime(post.metadata.capturedAt)}</span>
                         </div>
                       )}
+
+                      {/* Like Button */}
+                      <button
+                        onClick={(e) => handleToggleLike(post.id, e)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
+                          postLikes[post.id]?.liked
+                            ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border border-[#ADFF2F]'
+                            : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-[#ADFF2F]/50'
+                        }`}
+                      >
+                        <svg 
+                          className={`w-4 h-4 ${postLikes[post.id]?.liked ? 'fill-[#ADFF2F]' : 'fill-none'}`} 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                        </svg>
+                        <span className="text-xs font-semibold">
+                          {postLikes[post.id]?.count || 0}
+                        </span>
+                      </button>
                     </div>
                   </div>
                 )
@@ -982,11 +1032,13 @@ function App() {
             vibeOptions={vibeOptions}
             selectedPlace={postPlace}
             selectedVibe={postVibe}
+            selectedDescription={postDescription}
             mainImage={postMainImage}
             additionalImages={postAdditionalImages}
             metadata={postMetadata}
             onPlaceChange={setPostPlace}
             onVibeChange={setPostVibe}
+            onDescriptionChange={setPostDescription}
             onMainImageSelect={handleMainImageSelect}
             onAdditionalImagesSelect={handleAdditionalImagesSelect}
             onRemoveAdditionalImage={handleRemoveAdditionalImage}
@@ -1080,15 +1132,28 @@ function App() {
 
   // 커스텀 마커 아이콘 생성 함수
   const createCustomIcon = (imageUrl, isRecent = false, timeAgo = '') => {
+    // HTML 이스케이프 처리
+    const escapedImageUrl = imageUrl.replace(/"/g, '&quot;')
+    const escapedTimeAgo = timeAgo.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    
+    // 시간 정보 배지 HTML
+    const timeBadge = timeAgo 
+      ? `<div style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #ADFF2F; font-size: 9px; font-weight: bold; padding: 3px 6px; border-radius: 6px; white-space: nowrap; z-index: 10; border: 1px solid #ADFF2F; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">${escapedTimeAgo}</div>`
+      : ''
+    
+    const recentPulse = isRecent 
+      ? '<div style="position: absolute; inset: 0; border-radius: 50%; background: #ADFF2F; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.5;"></div>'
+      : ''
+    
     return L.divIcon({
       className: 'custom-marker',
       html: `
         <div style="position: relative; width: 64px; height: 80px;">
-          ${isRecent ? '<div style="position: absolute; inset: 0; border-radius: 50%; background: #ADFF2F; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.5;"></div>' : ''}
+          ${recentPulse}
           <div style="position: relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; border: 2px solid #ADFF2F; box-shadow: 0 10px 15px -3px rgba(173,255,47,0.5); background: #000;">
-            <img src="${imageUrl}" alt="pin" style="width: 100%; height: 100%; object-fit: cover;" />
-            <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);"></div>
-            ${timeAgo ? `<div style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #ADFF2F; font-size: 8px; padding: 2px 4px; border-radius: 4px; white-space: nowrap;">${timeAgo}</div>` : ''}
+            <img src="${escapedImageUrl}" alt="pin" style="width: 100%; height: 100%; object-fit: cover;" />
+            <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, transparent 60%);"></div>
+            ${timeBadge}
           </div>
           <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%);">
             <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 8px solid #ADFF2F;"></div>
@@ -1203,10 +1268,10 @@ function App() {
                   )
                 } else {
                   const vibeInfo = getVibeInfo(item.vibe)
-                  // 시간 정보 계산
+                  // 시간 정보 계산 (촬영 시간 또는 포스팅 시간 사용)
                   const timeAgo = item.metadata?.capturedAt 
                     ? getTimeAgo(new Date(item.metadata.capturedAt))
-                    : ''
+                    : (item.timestamp ? getTimeAgo(new Date(item.timestamp)) : '')
                   
                   return (
                     <Marker
@@ -1273,6 +1338,9 @@ function App() {
         formatCapturedTime={formatCapturedTime}
         formatDate={formatDate}
         getVibeInfo={getVibeInfo}
+        postLikes={postLikes}
+        onToggleLike={handleToggleLike}
+        user={user}
       />
     )
   }
@@ -1443,14 +1511,27 @@ function App() {
 }
 
   // Post Detail View Component (전체 화면)
-function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo }) {
+function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo, postLikes, onToggleLike, user }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
   const [touchStartY, setTouchStartY] = useState(null)
   const [touchEnd, setTouchEnd] = useState(null)
+  const [isSwiping, setIsSwiping] = useState(false)
+  const [userProfile, setUserProfile] = useState(null)
   
   const allImages = post.images || [post.image]
   const vibeInfo = getVibeInfo(post.vibe)
+  
+  // 사용자 프로필 정보 로드
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      if (post.userId || post.user) {
+        const profile = await db.getUserProfile(post.userId || post.user)
+        setUserProfile(profile)
+      }
+    }
+    loadUserProfile()
+  }, [post.userId, post.user])
   
   // Get all capture times
   const getCaptureTime = (index) => {
@@ -1489,6 +1570,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
     setTouchEnd(null)
     setTouchStart(e.targetTouches[0].clientX)
     setTouchStartY(e.targetTouches[0].clientY)
+    setIsSwiping(false)
   }
 
   const onTouchMove = (e) => {
@@ -1500,9 +1582,13 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       const deltaX = Math.abs(currentX - touchStart)
       const deltaY = Math.abs(currentY - touchStartY)
       
-      // 수평 이동이 수직 이동보다 크면 수직 스크롤 방지
-      if (deltaX > deltaY && deltaX > 10) {
-        e.preventDefault()
+      // 수평 이동이 수직 이동보다 크고, 최소 거리 이상이면 스와이프로 판단
+      if (deltaX > deltaY && deltaX > 15) {
+        setIsSwiping(true)
+        e.preventDefault() // 수직 스크롤 방지
+      } else if (deltaY > deltaX && deltaY > 15) {
+        // 수직 스크롤이 더 크면 스와이프 아님
+        setIsSwiping(false)
       }
     }
     
@@ -1510,7 +1596,11 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   }
 
   const onTouchEnd = () => {
-    if (!touchStart || !touchEnd) return
+    if (!touchStart || !touchEnd) {
+      setIsSwiping(false)
+      return
+    }
+    
     const distance = touchStart - touchEnd
     const isLeftSwipe = distance > minSwipeDistance
     const isRightSwipe = distance < -minSwipeDistance
@@ -1521,25 +1611,42 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
     if (isRightSwipe) {
       handlePrevImage()
     }
+    
+    setIsSwiping(false)
   }
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-800 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <div>
-            <h2 className="text-lg font-bold">{post.placeName}</h2>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
+      <div className="flex items-center gap-3 p-4 border-b border-gray-800 flex-shrink-0">
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        
+        {/* 사용자 정보 */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {userProfile?.avatar_url ? (
+            <img
+              src={userProfile.avatar_url}
+              alt={userProfile.full_name || 'User'}
+              className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-[#ADFF2F]/20 border border-[#ADFF2F] flex items-center justify-center text-[#ADFF2F] font-semibold flex-shrink-0">
+              {(userProfile?.full_name || post.user || 'U')[0].toUpperCase()}
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate">
+              {userProfile?.full_name || userProfile?.email || post.user || 'Anonymous'}
+            </div>
+            <div className="text-xs text-gray-400">
+              {post.timestamp ? formatDate(post.timestamp) : 'Unknown time'}
             </div>
           </div>
         </div>
@@ -1547,8 +1654,13 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       
       {/* Image Carousel */}
       <div 
-        className="flex-1 relative overflow-hidden"
-        style={{ touchAction: 'pan-x' }}
+        className="relative overflow-hidden"
+        style={{ 
+          touchAction: isSwiping ? 'pan-x' : 'pan-y pan-x',
+          height: '60vh',
+          minHeight: '400px',
+          maxHeight: '600px'
+        }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -1616,6 +1728,15 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
           )}
       </div>
       
+      {/* Description Section */}
+      {post.description && (
+        <div className="px-4 py-3 border-t border-gray-800 bg-gray-900/50">
+          <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">
+            {post.description}
+          </p>
+        </div>
+      )}
+      
       {/* Footer Info */}
       <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -1628,13 +1749,34 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
                   <span className="text-xs text-gray-300">{timeRange}</span>
                 </div>
               )}
+              <div className="flex items-center gap-2">
+                <svg className="w-3 h-3 text-[#ADFF2F]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                <span className="text-xs font-semibold text-[#ADFF2F]">GPS Verified</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#ADFF2F]/20 border border-[#ADFF2F] rounded-full">
-              <svg className="w-3 h-3 text-[#ADFF2F]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            
+            {/* Like Button */}
+            <button
+              onClick={(e) => onToggleLike(post.id, e)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                postLikes[post.id]?.liked
+                  ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border border-[#ADFF2F]'
+                  : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-[#ADFF2F]/50'
+              }`}
+            >
+              <svg 
+                className={`w-5 h-5 ${postLikes[post.id]?.liked ? 'fill-[#ADFF2F]' : 'fill-none'}`} 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
               </svg>
-              <span className="text-xs font-semibold text-[#ADFF2F]">GPS Verified</span>
-            </div>
+              <span className="text-sm font-semibold">
+                {postLikes[post.id]?.count || 0}
+              </span>
+            </button>
           </div>
       </div>
     </div>
@@ -1647,11 +1789,13 @@ function PostVibeModal({
   vibeOptions,
   selectedPlace,
   selectedVibe,
+  selectedDescription,
   mainImage,
   additionalImages,
   metadata,
   onPlaceChange,
   onVibeChange,
+  onDescriptionChange,
   onMainImageSelect,
   onAdditionalImagesSelect,
   onRemoveAdditionalImage,
@@ -1895,6 +2039,34 @@ function PostVibeModal({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Description Section */}
+          <div className="space-y-2">
+            <div>
+              <label className="text-sm font-semibold text-gray-400">
+                Description (Optional)
+              </label>
+              <p className="text-xs text-gray-500 mt-1">
+                Share your experience. Max 500 characters.
+              </p>
+            </div>
+            <textarea
+              value={selectedDescription || ''}
+              onChange={(e) => {
+                const value = e.target.value
+                if (value.length <= 500) {
+                  onDescriptionChange(value)
+                }
+              }}
+              placeholder="Tell us about your experience..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[#ADFF2F] transition-colors resize-none"
+              rows={4}
+              maxLength={500}
+            />
+            <div className="text-xs text-gray-500 text-right">
+              {(selectedDescription || '').length}/500
+            </div>
           </div>
 
           {/* Additional Photos Section */}

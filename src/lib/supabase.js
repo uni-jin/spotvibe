@@ -96,6 +96,7 @@ export const db = {
       placeId: post.place_id,
       placeName: post.place_name,
       vibe: post.vibe,
+      description: post.description || null,
       image: post.main_image_url || (post.post_images?.find(img => img.is_main)?.image_url),
       images: post.post_images
         ?.sort((a, b) => {
@@ -107,6 +108,7 @@ export const db = {
         .map(img => img.image_url) || [],
       timestamp: new Date(post.created_at),
       user: post.user_id || 'anonymous',
+      userId: post.user_id || null,
       metadata: {
         ...post.metadata,
         lat: post.metadata?.lat,
@@ -153,7 +155,7 @@ export const db = {
 
   // Create a new post
   async createPost(postData) {
-    const { placeId, placeName, vibe, mainImageUrl, additionalImageUrls, metadata, userId } = postData
+    const { placeId, placeName, vibe, description, mainImageUrl, additionalImageUrls, metadata, userId } = postData
 
     // Insert post
     const { data: post, error: postError } = await supabase
@@ -162,6 +164,7 @@ export const db = {
         place_id: placeId || null,
         place_name: placeName,
         vibe: vibe,
+        description: description || null,
         user_id: userId || null,
         main_image_url: mainImageUrl,
         metadata: {
@@ -236,5 +239,126 @@ export const db = {
       }, 
       error: null 
     }
+  },
+
+  // Get user profile by ID
+  async getUserProfile(userId) {
+    if (!userId) return null
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+
+    if (error) {
+      console.error('Error fetching user profile:', error)
+      return null
+    }
+
+    return data
+  },
+
+  // Get like count for a post
+  async getPostLikeCount(postId) {
+    const { count, error } = await supabase
+      .from('post_likes')
+      .select('*', { count: 'exact', head: true })
+      .eq('post_id', postId)
+
+    if (error) {
+      console.error('Error fetching like count:', error)
+      return 0
+    }
+
+    return count || 0
+  },
+
+  // Check if user liked a post
+  async isPostLikedByUser(postId, userId) {
+    if (!userId) return false
+
+    const { data, error } = await supabase
+      .from('post_likes')
+      .select('id')
+      .eq('post_id', postId)
+      .eq('user_id', userId)
+      .single()
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Error checking like status:', error)
+      return false
+    }
+
+    return !!data
+  },
+
+  // Toggle like on a post
+  async togglePostLike(postId, userId) {
+    if (!userId) {
+      throw new Error('User must be logged in to like posts')
+    }
+
+    // Check if already liked
+    const isLiked = await this.isPostLikedByUser(postId, userId)
+
+    if (isLiked) {
+      // Unlike: delete the like
+      const { error } = await supabase
+        .from('post_likes')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', userId)
+
+      if (error) {
+        console.error('Error unliking post:', error)
+        throw error
+      }
+
+      return { liked: false }
+    } else {
+      // Like: insert the like
+      const { error } = await supabase
+        .from('post_likes')
+        .insert({
+          post_id: postId,
+          user_id: userId,
+        })
+
+      if (error) {
+        console.error('Error liking post:', error)
+        throw error
+      }
+
+      return { liked: true }
+    }
+  },
+
+  // Get all likes for multiple posts (for batch loading)
+  async getPostLikes(postIds, userId = null) {
+    if (!postIds || postIds.length === 0) return {}
+
+    const { data, error } = await supabase
+      .from('post_likes')
+      .select('post_id, user_id')
+      .in('post_id', postIds)
+
+    if (error) {
+      console.error('Error fetching post likes:', error)
+      return {}
+    }
+
+    // Group by post_id and count likes
+    const likeCounts = {}
+    const userLikes = {}
+
+    data.forEach((like) => {
+      likeCounts[like.post_id] = (likeCounts[like.post_id] || 0) + 1
+      if (userId && like.user_id === userId) {
+        userLikes[like.post_id] = true
+      }
+    })
+
+    return { likeCounts, userLikes }
   },
 }
