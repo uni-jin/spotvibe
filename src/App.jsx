@@ -39,6 +39,18 @@ function App() {
     { id: 'Gangnam', name: 'Gangnam', active: false },
   ]
 
+  // 지역 선택 상태 복원 (새로고침 시 유지)
+  useEffect(() => {
+    const savedRegionId = localStorage.getItem('selectedRegionId')
+    if (savedRegionId) {
+      const savedRegion = regions.find((r) => r.id === savedRegionId)
+      if (savedRegion && savedRegion.active) {
+        setSelectedRegion(savedRegion)
+        setCurrentView('feed')
+      }
+    }
+  }, [])
+
   // Supabase에서 포스트 데이터 로드
   useEffect(() => {
     const loadPosts = async () => {
@@ -251,6 +263,8 @@ function App() {
     if (region.active) {
       setSelectedRegion(region)
       setCurrentView('feed')
+      // localStorage에 저장 (새로고침 시 복원용)
+      localStorage.setItem('selectedRegionId', region.id)
     } else {
       alert('준비 중입니다')
     }
@@ -265,12 +279,17 @@ function App() {
   }
 
   const handlePostClick = (post) => {
-    // 포스트 클릭 시 Detail View 표시
+    // 포스트 클릭 시 Detail View로 전환
     setSelectedPost(post)
+    setCurrentView('post-detail')
   }
   
   const handleClosePostDetail = () => {
     setSelectedPost(null)
+    // 이전 뷰로 돌아가기 (Feed 또는 Map)
+    if (currentView === 'post-detail') {
+      setCurrentView('feed')
+    }
   }
 
   const handleClearFilter = () => {
@@ -716,9 +735,6 @@ function App() {
             </div>
           ))}
         </div>
-
-        {/* Bottom Navigation */}
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
       </div>
     )
   }
@@ -819,16 +835,6 @@ function App() {
           )}
         </div>
 
-        {/* Post Detail Modal */}
-        {selectedPost && (
-          <PostDetailModal
-            post={selectedPost}
-            onClose={handleClosePostDetail}
-            formatCapturedTime={formatCapturedTime}
-            formatDate={formatDate}
-            getVibeInfo={getVibeInfo}
-          />
-        )}
 
         {/* Live Vibe Stream Section - 2열 격자 */}
         <div className="max-w-6xl mx-auto px-4 py-4">
@@ -1009,11 +1015,16 @@ function App() {
   const clusterPosts = (posts, zoomLevel) => {
     if (zoomLevel === 2 && selectedCluster) {
       // 확대된 상태: 선택된 클러스터의 개별 포스트만 반환
-      return selectedCluster.posts.map((post) => ({
-        ...post,
-        isCluster: false,
-        clusterId: selectedCluster.id,
-      }))
+      return selectedCluster.posts.map((post) => {
+        // 메인 이미지 추출 (images 배열의 첫 번째 또는 image 속성)
+        const mainImage = post.images?.[0] || post.image
+        return {
+          ...post,
+          image: mainImage,
+          isCluster: false,
+          clusterId: selectedCluster.id,
+        }
+      })
     }
 
     const postsWithCoords = posts.filter((post) => post.metadata)
@@ -1053,11 +1064,18 @@ function App() {
       clusters.push(cluster)
     })
 
-    return clusters.map((cluster) => ({
-      ...cluster,
-      isCluster: cluster.posts.length > 1,
-      count: cluster.posts.length,
-    }))
+    return clusters.map((cluster) => {
+      // 메인 이미지 추출 (첫 번째 포스트의 메인 이미지 사용)
+      const firstPost = cluster.posts[0]
+      const mainImage = firstPost.images?.[0] || firstPost.image
+      
+      return {
+        ...cluster,
+        image: mainImage, // 개별 포스트일 때도 이미지 포함
+        isCluster: cluster.posts.length > 1,
+        count: cluster.posts.length,
+      }
+    })
   }
 
   // 커스텀 마커 아이콘 생성 함수
@@ -1103,8 +1121,10 @@ function App() {
   // Map View
   if (currentView === 'map') {
     const mapItems = clusterPosts(vibePosts, mapZoom)
-    // 성수동 중심 좌표
-    const seongsuCenter = [37.5446, 127.0559]
+    // 선택한 지역이 있으면 해당 지역 중심, 없으면 성수동 기본값
+    const mapCenter = selectedRegion 
+      ? (selectedRegion.id === 'Seongsu' ? [37.5446, 127.0559] : [37.5446, 127.0559]) // 다른 지역 좌표는 나중에 추가
+      : [37.5446, 127.0559] // 기본값: 성수동
 
     return (
       <div className="min-h-screen bg-black text-white pb-24 relative overflow-hidden">
@@ -1112,14 +1132,14 @@ function App() {
         <div className="absolute top-0 left-0 right-0 bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
           <div className="px-4 py-3">
             <div className="flex items-center justify-between">
-              <div>
+      <div>
                 <h1 className="text-xl font-bold">
                   Live Radar <span className="text-[#ADFF2F]">📡</span>
                 </h1>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {vibePosts.filter((p) => p.metadata).length} active signals
                 </p>
-              </div>
+      </div>
               {mapZoom === 2 && (
                 <button
                   onClick={() => {
@@ -1130,7 +1150,7 @@ function App() {
                   className="px-3 py-1.5 text-xs font-semibold bg-[#ADFF2F]/20 text-[#ADFF2F] rounded-lg border border-[#ADFF2F]/50 hover:bg-[#ADFF2F]/30"
                 >
                   ← Back
-                </button>
+        </button>
               )}
             </div>
           </div>
@@ -1139,7 +1159,7 @@ function App() {
         {/* Leaflet Map */}
         <div className="absolute inset-0 pt-16" style={{ height: 'calc(100vh - 64px)' }}>
           <MapContainer
-            center={seongsuCenter}
+            center={mapCenter}
             zoom={16}
             style={{ height: '100%', width: '100%', zIndex: 1 }}
             className="dark-map"
@@ -1238,6 +1258,19 @@ function App() {
     )
   }
 
+  // Post Detail View
+  if (currentView === 'post-detail' && selectedPost) {
+    return (
+      <PostDetailView
+        post={selectedPost}
+        onClose={handleClosePostDetail}
+        formatCapturedTime={formatCapturedTime}
+        formatDate={formatDate}
+        getVibeInfo={getVibeInfo}
+      />
+    )
+  }
+
   // Quest View
   if (currentView === 'quest') {
     return (
@@ -1249,8 +1282,8 @@ function App() {
             </h1>
             <p className="text-sm text-gray-400 mt-1">
               Complete challenges and earn rewards
-            </p>
-          </div>
+        </p>
+      </div>
         </div>
 
         <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1403,9 +1436,11 @@ function App() {
   return null
 }
 
-// Post Detail Modal Component
-function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVibeInfo }) {
+// Post Detail View Component (전체 화면)
+function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [touchStart, setTouchStart] = useState(null)
+  const [touchEnd, setTouchEnd] = useState(null)
   
   const allImages = post.images || [post.image]
   const vibeInfo = getVibeInfo(post.vibe)
@@ -1440,37 +1475,61 @@ function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVib
     setCurrentImageIndex((prev) => (prev < allImages.length - 1 ? prev + 1 : 0))
   }
 
+  // 터치 제스처 처리
+  const minSwipeDistance = 50
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null)
+    setTouchStart(e.targetTouches[0].clientX)
+  }
+
+  const onTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientX)
+  }
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > minSwipeDistance
+    const isRightSwipe = distance < -minSwipeDistance
+
+    if (isLeftSwipe) {
+      handleNextImage()
+    }
+    if (isRightSwipe) {
+      handlePrevImage()
+    }
+  }
+
   return (
-    <>
-      <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50"
-        onClick={onClose}
-      />
-      
-      <div className="fixed inset-4 md:inset-8 bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-800">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-      <div>
-              <h2 className="text-lg font-bold">{post.placeName}</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm">{vibeInfo.emoji}</span>
-                <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
-      </div>
+    <div className="min-h-screen bg-black text-white flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <div>
+            <h2 className="text-lg font-bold">{post.placeName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
             </div>
           </div>
         </div>
-        
-        {/* Image Carousel */}
-        <div className="flex-1 relative overflow-hidden">
+      </div>
+      
+      {/* Image Carousel */}
+      <div 
+        className="flex-1 relative overflow-hidden"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
           {allImages.map((image, index) => (
             <div
               key={index}
@@ -1532,10 +1591,10 @@ function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVib
               ))}
             </div>
           )}
-        </div>
-        
-        {/* Footer Info */}
-        <div className="p-4 border-t border-gray-800 bg-gray-900/50">
+      </div>
+      
+      {/* Footer Info */}
+      <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               {timeRange && (
@@ -1554,9 +1613,8 @@ function PostDetailModal({ post, onClose, formatCapturedTime, formatDate, getVib
               <span className="text-xs font-semibold text-[#ADFF2F]">GPS Verified</span>
             </div>
           </div>
-        </div>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -1613,29 +1671,33 @@ function PostVibeModal({
         onClick={onClose}
       />
       
-      <div className="fixed left-4 right-4 bottom-4 md:left-1/2 md:right-auto md:transform md:-translate-x-1/2 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 max-h-[90vh] overflow-y-auto">
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold">Post Vibe</h2>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+      <div className="fixed left-4 right-4 top-4 bottom-4 md:left-1/2 md:right-auto md:transform md:-translate-x-1/2 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 flex flex-col max-h-[90vh] md:max-h-[85vh]">
+        {/* 고정 헤더 */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-800 flex-shrink-0">
+          <h2 className="text-2xl font-bold">Post Vibe</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+        
+        {/* 스크롤 가능한 콘텐츠 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-6 space-y-6">
 
           <div className="space-y-2 relative" ref={dropdownRef}>
             <label className="text-sm font-semibold text-gray-400">
@@ -1888,6 +1950,7 @@ function PostVibeModal({
               'Post Now'
             )}
           </button>
+          </div>
         </div>
       </div>
     </>
