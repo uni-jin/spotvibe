@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import EXIF from 'exif-js'
+import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
 import { auth, db } from './lib/supabase'
 
@@ -320,168 +320,63 @@ function App() {
     setPostMetadata(null)
   }
 
-  // 실제 EXIF 메타데이터 검증
-  const validateImageMetadata = (file) => {
-    return new Promise((resolve) => {
-      console.log('Starting EXIF metadata validation for file:', {
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        lastModified: new Date(file.lastModified)
-      })
-      
-      // 타임아웃 설정 (10초로 증가)
-      const timeout = setTimeout(() => {
-        console.error('EXIF data reading timeout after 10 seconds')
-        alert('Failed to read photo metadata. The photo may not contain GPS information. Please check your GPS settings and upload a photo taken with GPS enabled.')
-        resolve(null)
-      }, 10000)
-
-      try {
-        console.log('Calling EXIF.getData...')
-        EXIF.getData(file, function() {
-          clearTimeout(timeout)
-          console.log('EXIF.getData callback called')
-          
-          try {
-            // 모든 EXIF 태그 확인 (디버깅용)
-            const allTags = EXIF.getAllTags(this)
-            console.log('All EXIF tags found:', Object.keys(allTags).length, 'tags')
-            
-            // GPS 정보 추출
-            const lat = EXIF.getTag(this, 'GPSLatitude')
-            const latRef = EXIF.getTag(this, 'GPSLatitudeRef')
-            const lng = EXIF.getTag(this, 'GPSLongitude')
-            const lngRef = EXIF.getTag(this, 'GPSLongitudeRef')
-
-            console.log('GPS data extracted:', {
-              lat,
-              latRef,
-              lng,
-              lngRef,
-              latType: typeof lat,
-              lngType: typeof lng,
-              latIsArray: Array.isArray(lat),
-              lngIsArray: Array.isArray(lng),
-              latValue: lat,
-              lngValue: lng
-            })
-
-            // 촬영 시간 추출
-            const dateTimeOriginal = EXIF.getTag(this, 'DateTimeOriginal')
-            const dateTime = EXIF.getTag(this, 'DateTime')
-
-            // GPS 정보가 없으면 실패
-            if (!lat || !lng) {
-              console.warn('GPS information not found in EXIF data')
-              console.log('Available GPS-related tags:', {
-                GPSLatitude: lat,
-                GPSLatitudeRef: latRef,
-                GPSLongitude: lng,
-                GPSLongitudeRef: lngRef,
-                GPSInfo: EXIF.getTag(this, 'GPSInfo'),
-                GPSVersionID: EXIF.getTag(this, 'GPSVersionID')
-              })
-              console.log('All available EXIF tags:', Object.keys(allTags))
-              alert('Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
-              resolve(null)
-              return
-            }
-
-            // GPS 좌표 변환 (도분초 형식 -> 십진수)
-            const convertDMSToDD = (dms, ref) => {
-              if (!dms) {
-                console.warn('DMS data is null or undefined:', dms)
-                return null
-              }
-              if (!Array.isArray(dms)) {
-                console.warn('DMS data is not an array:', dms, typeof dms)
-                return null
-              }
-              if (dms.length < 3) {
-                console.warn('DMS array has insufficient elements:', dms, 'length:', dms.length)
-                return null
-              }
-              let dd = dms[0] + dms[1] / 60 + dms[2] / (60 * 60)
-              if (ref === 'S' || ref === 'W') {
-                dd = dd * -1
-              }
-              return dd
-            }
-
-            const latitude = convertDMSToDD(lat, latRef)
-            const longitude = convertDMSToDD(lng, lngRef)
-
-            console.log('Converted GPS coordinates:', {
-              latitude,
-              longitude,
-              latValid: latitude !== null && !isNaN(latitude),
-              lngValid: longitude !== null && !isNaN(longitude),
-              originalLat: lat,
-              originalLng: lng
-            })
-
-            // GPS 좌표 변환 실패 체크
-            if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
-              console.error('Invalid GPS coordinates after conversion:', {
-                latitude,
-                longitude,
-                lat,
-                lng,
-                latRef,
-                lngRef
-              })
-              alert('Photo does not contain valid location information. Please check your GPS settings and upload a photo taken with GPS enabled.')
-              resolve(null)
-              return
-            }
-
-            // 촬영 시간 파싱
-            let capturedAt = null
-            if (dateTimeOriginal) {
-              // EXIF DateTimeOriginal 형식: "YYYY:MM:DD HH:mm:ss"
-              const dateStr = dateTimeOriginal.replace(/(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace(' ', 'T')
-              capturedAt = new Date(dateStr)
-            } else if (dateTime) {
-              const dateStr = dateTime.replace(/(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace(' ', 'T')
-              capturedAt = new Date(dateStr)
-            } else {
-              // EXIF에 촬영 시간이 없으면 파일 수정 시간 사용
-              capturedAt = new Date(file.lastModified)
-            }
-
-            // 촬영 시간이 유효하지 않으면 파일 수정 시간 사용
-            if (isNaN(capturedAt.getTime())) {
-              capturedAt = new Date(file.lastModified)
-            }
-
-            // 위치 이름 (간단한 좌표 기반)
-            const locationName = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}`
-
-            const metadata = {
-              lat: latitude,
-              lng: longitude,
-              capturedAt: capturedAt,
-              locationName: locationName,
-            }
-
-            console.log('Metadata successfully extracted:', metadata)
-            resolve(metadata)
-          } catch (error) {
-            console.error('Error processing EXIF data:', error)
-            console.error('Error stack:', error.stack)
-            alert('Failed to read photo metadata. Please try another photo.')
-            resolve(null)
-          }
-        })
-      } catch (error) {
-        clearTimeout(timeout)
-        console.error('Error calling EXIF.getData:', error)
-        console.error('Error stack:', error.stack)
-        alert('Failed to read photo metadata. The photo may not be a valid image file or may not contain GPS information.')
-        resolve(null)
-      }
+  // 실제 EXIF 메타데이터 검증 (exifr 사용)
+  const validateImageMetadata = async (file) => {
+    console.log('Starting EXIF metadata validation (exifr) for file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      lastModified: new Date(file.lastModified),
     })
+
+    try {
+      // exifr로 필요한 정보만 파싱
+      const result = await exifr.parse(file, ['latitude', 'longitude', 'DateTimeOriginal'])
+      console.log('exifr.parse result:', result)
+
+      // GPS 정보가 없으면 실패
+      if (!result || result.latitude == null || result.longitude == null) {
+        alert(
+          'Photo does not contain location information. Please check your GPS settings and upload a photo taken with GPS enabled.'
+        )
+        return null
+      }
+
+      const latitude = result.latitude
+      const longitude = result.longitude
+
+      // 촬영 시간
+      let capturedAt = null
+      if (result.DateTimeOriginal) {
+        capturedAt = new Date(result.DateTimeOriginal)
+        console.log('Using DateTimeOriginal from exifr:', result.DateTimeOriginal, '->', capturedAt)
+      } else {
+        capturedAt = new Date(file.lastModified)
+        console.log('Using file.lastModified as capturedAt:', capturedAt)
+      }
+
+      if (isNaN(capturedAt.getTime())) {
+        capturedAt = new Date(file.lastModified)
+      }
+
+      const locationName = `Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}`
+
+      const metadata = {
+        lat: latitude,
+        lng: longitude,
+        capturedAt,
+        locationName,
+      }
+
+      console.log('Metadata successfully extracted (exifr):', metadata)
+      return metadata
+    } catch (error) {
+      console.error('Error reading EXIF data with exifr:', error)
+      alert(
+        'Failed to read photo metadata. The photo may not be a valid image file or may not contain GPS information.'
+      )
+      return null
+    }
   }
 
   const handleMainImageSelect = async (e) => {
