@@ -361,4 +361,36 @@ export const db = {
 
     return { likeCounts, userLikes }
   },
+
+  // Delete a post
+  async deletePost(postId, userId) {
+    // 먼저 포스트가 해당 사용자의 것인지 확인
+    const { data: post, error: fetchError } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', postId)
+      .single()
+
+    if (fetchError) {
+      console.error('Error fetching post:', fetchError)
+      throw new Error('Post not found')
+    }
+
+    if (post.user_id !== userId) {
+      throw new Error('You do not have permission to delete this post')
+    }
+
+    // 포스트 삭제 (CASCADE로 인해 post_images와 post_likes도 자동 삭제됨)
+    const { error: deleteError } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', postId)
+
+    if (deleteError) {
+      console.error('Error deleting post:', deleteError)
+      throw deleteError
+    }
+
+    return { success: true }
+  },
 }

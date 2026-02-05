@@ -1413,9 +1413,13 @@ function App() {
                                 <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
                               </div>
                               {item.metadata?.capturedAt && (
-                                <div className="text-xs text-gray-400 space-y-1">
-                                  <div>🕒 {formatDate(item.metadata.capturedAt)} {formatCapturedTime(item.metadata.capturedAt)}</div>
-                                  <div className="text-[#ADFF2F]">{timeAgo}</div>
+                                <div className="text-xs text-gray-400">
+                                  <div className="flex items-center gap-1.5">
+                                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span>Captured at {formatCapturedTime(item.metadata.capturedAt)}</span>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1463,6 +1467,7 @@ function App() {
         postLikes={postLikes}
         onToggleLike={handleToggleLike}
         user={user}
+        onDeletePost={handleDeletePost}
       />
     )
   }
@@ -1633,7 +1638,7 @@ function App() {
 }
 
   // Post Detail View Component (전체 화면)
-function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo, postLikes, onToggleLike, user }) {
+function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo, postLikes, onToggleLike, user, onDeletePost }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
   const [touchStartY, setTouchStartY] = useState(null)
@@ -1768,10 +1773,29 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
               {userProfile?.full_name || userProfile?.email || post.user || 'Anonymous'}
             </div>
             <div className="text-xs text-gray-400">
-              {post.timestamp ? formatDate(post.timestamp) : 'Unknown time'}
+              {post.timestamp ? (formatDate(post.timestamp) === 'Today' || formatDate(post.timestamp) === 'Yesterday' 
+                ? `${formatDate(post.timestamp)} ${formatCapturedTime(post.timestamp)}`
+                : formatDate(post.timestamp)) : 'Unknown time'}
             </div>
           </div>
         </div>
+        
+        {/* 삭제 버튼 (본인 포스팅만) */}
+        {user?.id && (post.userId === user.id || post.user === user.id) && (
+          <button
+            onClick={() => {
+              if (confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+                onDeletePost(post.id)
+              }
+            }}
+            className="p-2 hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0 text-red-400"
+            title="Delete post"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        )}
       </div>
       
       {/* Image Carousel */}
