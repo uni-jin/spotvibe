@@ -53,6 +53,46 @@ function App() {
     }
   }, [])
 
+  // 브라우저 뒤로가기 처리
+  useEffect(() => {
+    const handlePopState = (event) => {
+      if (event.state) {
+        const { view, postId } = event.state
+        if (view === 'post-detail' && postId) {
+          // 포스트 상세 화면으로 복원
+          const post = vibePosts.find(p => p.id === postId)
+          if (post) {
+            setSelectedPost(post)
+            setCurrentView('post-detail')
+          } else {
+            // 포스트를 찾을 수 없으면 Feed로 이동
+            setSelectedPost(null)
+            setCurrentView('feed')
+          }
+        } else if (view === 'feed' || view === 'map' || view === 'quest' || view === 'my') {
+          // 다른 뷰로 복원
+          setSelectedPost(null)
+          setCurrentView(view)
+        }
+      } else {
+        // 히스토리 상태가 없으면 Feed로 이동
+        setSelectedPost(null)
+        setCurrentView('feed')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    
+    // 초기 히스토리 상태 설정
+    if (!window.history.state) {
+      window.history.replaceState({ view: currentView }, '', '#')
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [vibePosts, currentView])
+
   // Supabase에서 포스트 데이터 로드
   useEffect(() => {
     const loadPosts = async () => {
@@ -61,6 +101,34 @@ function App() {
         setPostsError(null)
         const posts = await db.getPosts()
         setVibePosts(posts)
+        
+        // 좋아요 정보 로드
+        if (posts.length > 0 && user?.id) {
+          const postIds = posts.map(p => p.id)
+          const { likeCounts, userLikes } = await db.getPostLikes(postIds, user.id)
+          
+          const likesData = {}
+          postIds.forEach(postId => {
+            likesData[postId] = {
+              count: likeCounts[postId] || 0,
+              liked: userLikes[postId] || false
+            }
+          })
+          setPostLikes(likesData)
+        } else if (posts.length > 0) {
+          // 로그인하지 않은 경우 좋아요 개수만 로드
+          const postIds = posts.map(p => p.id)
+          const { likeCounts } = await db.getPostLikes(postIds)
+          
+          const likesData = {}
+          postIds.forEach(postId => {
+            likesData[postId] = {
+              count: likeCounts[postId] || 0,
+              liked: false
+            }
+          })
+          setPostLikes(likesData)
+        }
       } catch (error) {
         console.error('Error loading posts:', error)
         setPostsError('Failed to load posts. Please try again later.')
@@ -70,7 +138,7 @@ function App() {
     }
 
     loadPosts()
-  }, [])
+  }, [user])
 
   // Supabase에서 팝업스토어 목록 로드
   useEffect(() => {
@@ -282,17 +350,55 @@ function App() {
 
   const handlePostClick = (post) => {
     // 포스트 클릭 시 Detail View로 전환
+    // 브라우저 히스토리에 추가
+    window.history.pushState({ view: 'post-detail', postId: post.id }, '', `#post-${post.id}`)
     setSelectedPost(post)
     setCurrentView('post-detail')
   }
   
   const handleClosePostDetail = () => {
+    // 브라우저 히스토리에 이전 뷰 추가
+    const previousView = currentView === 'post-detail' ? 'feed' : currentView
+    window.history.pushState({ view: previousView }, '', previousView === 'feed' ? '#feed' : '#')
     setSelectedPost(null)
-    // 이전 뷰로 돌아가기 (Feed 또는 Map)
-    if (currentView === 'post-detail') {
-      setCurrentView('feed')
-    }
+    setCurrentView(previousView)
   }
+  
+  // 브라우저 뒤로가기 처리
+  useEffect(() => {
+    const handlePopState = (event) => {
+      if (event.state) {
+        const { view, postId } = event.state
+        if (view === 'post-detail' && postId) {
+          // 포스트 상세 화면으로 복원
+          const post = vibePosts.find(p => p.id === postId)
+          if (post) {
+            setSelectedPost(post)
+            setCurrentView('post-detail')
+          }
+        } else if (view === 'feed' || view === 'map' || view === 'quest' || view === 'my') {
+          // 다른 뷰로 복원
+          setSelectedPost(null)
+          setCurrentView(view)
+        }
+      } else {
+        // 히스토리 상태가 없으면 Feed로 이동
+        setSelectedPost(null)
+        setCurrentView('feed')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    
+    // 초기 히스토리 상태 설정
+    if (!window.history.state) {
+      window.history.replaceState({ view: currentView }, '', '#')
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [currentView, vibePosts])
 
   // 좋아요 토글 함수
   const handleToggleLike = async (postId, e) => {
@@ -898,6 +1004,10 @@ function App() {
               {filteredPosts.map((post, index) => {
                 const vibeInfo = getVibeInfo(post.vibe)
                 
+                // 핀터레스트 스타일: 카드 높이 변형
+                const heightVariants = ['h-64', 'h-80', 'h-72', 'h-96', 'h-68', 'h-84']
+                const cardHeight = heightVariants[index % heightVariants.length]
+                
                 // Get main photo (first image) and count additional photos
                 const mainImage = post.images?.[0] || post.image
                 const additionalCount = post.images?.length > 1 ? post.images.length - 1 : 0
@@ -906,12 +1016,12 @@ function App() {
                   <div
                     key={post.id}
                     onClick={() => handlePostClick(post)}
-                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer ${
+                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col ${
                       spotFilter === post.placeId ? 'ring-2 ring-[#ADFF2F]/50' : ''
                     }`}
                   >
                     {/* Image */}
-                    <div className="relative w-full aspect-square overflow-hidden">
+                    <div className={`relative w-full ${cardHeight} overflow-hidden flex-shrink-0`}>
                       <img
                         src={mainImage}
                         alt={post.placeName}
@@ -1132,12 +1242,19 @@ function App() {
 
   // 커스텀 마커 아이콘 생성 함수
   const createCustomIcon = (imageUrl, isRecent = false, timeAgo = '') => {
+    // 이미지 URL이 없으면 기본 이미지 사용
+    if (!imageUrl) {
+      imageUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMzMzMzMzIi8+CjxwYXRoIGQ9Ik0zMiAyMEMyNS4zNzI2IDIwIDIwIDI1LjM3MjYgMjAgMzJDMjAgMzguNjI3NCAyNS4zNzI2IDQ0IDMyIDQ0QzM4LjYyNzQgNDQgNDQgMzguNjI3NCA0NCAzMkM0NCAyNS4zNzI2IDM4LjYyNzQgMjAgMzIgMjBaIiBmaWxsPSIjQUREQ0YyRiIvPgo8L3N2Zz4K'
+    }
+    
     // HTML 이스케이프 처리
     const escapedImageUrl = imageUrl.replace(/"/g, '&quot;')
-    const escapedTimeAgo = timeAgo.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    const escapedTimeAgo = timeAgo && typeof timeAgo === 'string' 
+      ? timeAgo.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      : ''
     
     // 시간 정보 배지 HTML
-    const timeBadge = timeAgo 
+    const timeBadge = escapedTimeAgo 
       ? `<div style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #ADFF2F; font-size: 9px; font-weight: bold; padding: 3px 6px; border-radius: 6px; white-space: nowrap; z-index: 10; border: 1px solid #ADFF2F; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">${escapedTimeAgo}</div>`
       : ''
     
@@ -1273,17 +1390,20 @@ function App() {
                     ? getTimeAgo(new Date(item.metadata.capturedAt))
                     : (item.timestamp ? getTimeAgo(new Date(item.timestamp)) : '')
                   
+                  // 이미지 URL 확인
+                  const markerImage = item.image || item.images?.[0] || null
+                  
                   return (
                     <Marker
                       key={item.id}
                       position={position}
-                      icon={createCustomIcon(item.image, isRecent, timeAgo)}
+                      icon={createCustomIcon(markerImage, isRecent, timeAgo)}
                     >
                       <Popup className="custom-popup">
                         <div className="bg-gray-900 border-2 border-[#ADFF2F] rounded-lg p-4 shadow-2xl min-w-[200px]">
                           <div className="flex items-start gap-3 mb-3">
                             <img
-                              src={item.image}
+                              src={markerImage || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMzMzMzMzIi8+Cjwvc3ZnPgo='}
                               alt={item.placeName}
                               className="w-16 h-16 rounded object-cover"
                             />
@@ -1302,7 +1422,9 @@ function App() {
                           </div>
                           <button
                             onClick={() => {
-                              handlePostClick(item)
+                              // 원본 포스트 데이터 찾기 (클러스터링된 데이터가 아닌 원본)
+                              const originalPost = vibePosts.find(p => p.id === item.id) || item
+                              handlePostClick(originalPost)
                               setSelectedPin(null)
                             }}
                             className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors"
