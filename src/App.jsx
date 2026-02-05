@@ -1079,7 +1079,7 @@ function App() {
   }
 
   // 커스텀 마커 아이콘 생성 함수
-  const createCustomIcon = (imageUrl, isRecent = false) => {
+  const createCustomIcon = (imageUrl, isRecent = false, timeAgo = '') => {
     return L.divIcon({
       className: 'custom-marker',
       html: `
@@ -1088,6 +1088,7 @@ function App() {
           <div style="position: relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; border: 2px solid #ADFF2F; box-shadow: 0 10px 15px -3px rgba(173,255,47,0.5); background: #000;">
             <img src="${imageUrl}" alt="pin" style="width: 100%; height: 100%; object-fit: cover;" />
             <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);"></div>
+            ${timeAgo ? `<div style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #ADFF2F; font-size: 8px; padding: 2px 4px; border-radius: 4px; white-space: nowrap;">${timeAgo}</div>` : ''}
           </div>
           <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%);">
             <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 8px solid #ADFF2F;"></div>
@@ -1202,11 +1203,16 @@ function App() {
                   )
                 } else {
                   const vibeInfo = getVibeInfo(item.vibe)
+                  // 시간 정보 계산
+                  const timeAgo = item.metadata?.capturedAt 
+                    ? getTimeAgo(new Date(item.metadata.capturedAt))
+                    : ''
+                  
                   return (
                     <Marker
                       key={item.id}
                       position={position}
-                      icon={createCustomIcon(item.image, isRecent)}
+                      icon={createCustomIcon(item.image, isRecent, timeAgo)}
                     >
                       <Popup className="custom-popup">
                         <div className="bg-gray-900 border-2 border-[#ADFF2F] rounded-lg p-4 shadow-2xl min-w-[200px]">
@@ -1222,16 +1228,16 @@ function App() {
                                 <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
                               </div>
                               {item.metadata?.capturedAt && (
-                                <div className="text-xs text-gray-400">
-                                  🕒 {formatDate(item.metadata.capturedAt)} {formatCapturedTime(item.metadata.capturedAt)}
+                                <div className="text-xs text-gray-400 space-y-1">
+                                  <div>🕒 {formatDate(item.metadata.capturedAt)} {formatCapturedTime(item.metadata.capturedAt)}</div>
+                                  <div className="text-[#ADFF2F]">{timeAgo}</div>
                                 </div>
                               )}
                             </div>
                           </div>
                           <button
                             onClick={() => {
-                              setSpotFilter(item.placeId)
-                              setCurrentView('feed')
+                              handlePostClick(item)
                               setSelectedPin(null)
                             }}
                             className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors"
@@ -1436,10 +1442,11 @@ function App() {
   return null
 }
 
-// Post Detail View Component (전체 화면)
+  // Post Detail View Component (전체 화면)
 function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
+  const [touchStartY, setTouchStartY] = useState(null)
   const [touchEnd, setTouchEnd] = useState(null)
   
   const allImages = post.images || [post.image]
@@ -1481,10 +1488,25 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const onTouchStart = (e) => {
     setTouchEnd(null)
     setTouchStart(e.targetTouches[0].clientX)
+    setTouchStartY(e.targetTouches[0].clientY)
   }
 
   const onTouchMove = (e) => {
-    setTouchEnd(e.targetTouches[0].clientX)
+    const currentX = e.targetTouches[0].clientX
+    const currentY = e.targetTouches[0].clientY
+    
+    // 수평 스와이프 감지 시 수직 스크롤 방지
+    if (touchStart !== null && touchStartY !== null) {
+      const deltaX = Math.abs(currentX - touchStart)
+      const deltaY = Math.abs(currentY - touchStartY)
+      
+      // 수평 이동이 수직 이동보다 크면 수직 스크롤 방지
+      if (deltaX > deltaY && deltaX > 10) {
+        e.preventDefault()
+      }
+    }
+    
+    setTouchEnd(currentX)
   }
 
   const onTouchEnd = () => {
@@ -1526,6 +1548,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       {/* Image Carousel */}
       <div 
         className="flex-1 relative overflow-hidden"
+        style={{ touchAction: 'pan-x' }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
