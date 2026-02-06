@@ -1342,11 +1342,27 @@ function App() {
       const firstPost = cluster.posts[0]
       const mainImage = firstPost.images?.[0] || firstPost.image
       
+      // 개별 포스트일 때는 첫 번째 포스트의 모든 속성 포함
+      if (cluster.posts.length === 1) {
+        return {
+          ...firstPost, // 원본 포스트의 모든 속성 포함 (id, metadata, vibe, placeName 등)
+          image: mainImage,
+          isCluster: false,
+          count: 1,
+          centerLat: cluster.centerLat,
+          centerLng: cluster.centerLng,
+        }
+      }
+      
+      // 클러스터일 때는 첫 번째 포스트의 대표 정보 포함
       return {
         ...cluster,
-        image: mainImage, // 개별 포스트일 때도 이미지 포함
-        isCluster: cluster.posts.length > 1,
+        ...firstPost, // 첫 번째 포스트의 속성 포함 (metadata, vibe, placeName 등)
+        image: mainImage,
+        isCluster: true,
         count: cluster.posts.length,
+        // 클러스터일 때는 첫 번째 포스트의 id를 사용 (View Detail 버튼용)
+        id: firstPost.id,
       }
     })
   }
@@ -1523,13 +1539,19 @@ function App() {
                               <div className="mb-2">
                                 <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
                               </div>
-                              {item.metadata?.capturedAt && (
+                              {(item.metadata?.capturedAt || item.timestamp) && (
                                 <div className="text-xs text-gray-400">
                                   <div className="flex items-center gap-1.5">
                                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    <span>Captured at {formatCapturedTime(item.metadata.capturedAt)}</span>
+                                    <span>
+                                      Captured at {
+                                        item.metadata?.capturedAt 
+                                          ? formatCapturedTime(new Date(item.metadata.capturedAt))
+                                          : (item.timestamp ? formatCapturedTime(new Date(item.timestamp)) : '')
+                                      }
+                                    </span>
                                   </div>
                                 </div>
                               )}
@@ -1574,9 +1596,9 @@ function App() {
       setCurrentView('feed')
       return null
     }
-    
-    return (
-      <>
+
+  return (
+    <>
         <PostDetailView
           post={selectedPost}
           onClose={handleClosePostDetail}
@@ -2347,7 +2369,7 @@ function PostVibeModal({
 
           {/* Main Photo Section */}
           <div className="space-y-2">
-            <div>
+      <div>
               <label className="text-sm font-semibold text-gray-400">
                 Main Photo
               </label>
@@ -2485,7 +2507,7 @@ function PostVibeModal({
                       className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs hover:bg-red-600 transition-colors"
                     >
                       ✕
-                    </button>
+        </button>
                   </div>
                 ))}
               </div>
@@ -2603,8 +2625,8 @@ function DeleteConfirmModal({ onClose, onConfirm }) {
           </p>
           <p className="text-sm text-gray-400">
             This action cannot be undone.
-          </p>
-        </div>
+        </p>
+      </div>
         
         <div className="flex gap-3">
           <button
