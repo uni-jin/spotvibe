@@ -1206,6 +1206,14 @@ function App() {
           />
         )}
 
+        {/* Delete Confirm Modal */}
+        {showDeleteConfirmModal && postToDelete && (
+          <DeleteConfirmModal
+            onClose={handleCloseDeleteConfirm}
+            onConfirm={() => handleDeletePost(postToDelete)}
+          />
+        )}
+
         {/* Post Vibe Modal */}
         {isModalOpen && (
           <PostVibeModal
@@ -2422,6 +2430,56 @@ function BottomNav({ currentView, onNavClick }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// Delete Confirm Modal Component
+function DeleteConfirmModal({ onClose, onConfirm }) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50"
+        onClick={onClose}
+      />
+      
+      <div className="fixed left-4 right-4 bottom-4 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 p-6 md:p-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold">Delete Post</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="mb-6">
+          <p className="text-gray-300 mb-2">
+            Are you sure you want to delete this post?
+          </p>
+          <p className="text-sm text-gray-400">
+            This action cannot be undone.
+          </p>
+        </div>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors border border-gray-700"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors border border-red-600"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </>
   )
 }
 
