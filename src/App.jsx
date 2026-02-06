@@ -436,6 +436,44 @@ function App() {
     }
   }
 
+  // 포스팅 삭제 함수
+  const handleDeletePost = async (postId) => {
+    if (!user?.id) {
+      alert('You must be logged in to delete posts.')
+      return
+    }
+
+    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      await db.deletePost(postId, user.id)
+      
+      // 로컬 state에서 포스트 제거
+      setVibePosts(prev => prev.filter(p => p.id !== postId))
+      
+      // 좋아요 정보에서도 제거
+      setPostLikes(prev => {
+        const newLikes = { ...prev }
+        delete newLikes[postId]
+        return newLikes
+      })
+      
+      // 상세 화면 닫고 Feed로 이동
+      handleClosePostDetail()
+      
+      // 성공 메시지
+      setShowToast(true)
+      setTimeout(() => {
+        setShowToast(false)
+      }, 3000)
+    } catch (error) {
+      console.error('Error deleting post:', error)
+      alert(error.message || 'Failed to delete post. Please try again.')
+    }
+  }
+
   const handleClearFilter = () => {
     setSpotFilter(null)
   }
