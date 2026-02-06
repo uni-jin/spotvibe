@@ -1553,7 +1553,7 @@ function App() {
         postLikes={postLikes}
         onToggleLike={handleToggleLike}
         user={user}
-        onDeletePost={handleDeletePost}
+        onDeletePost={handleOpenDeleteConfirm}
       />
     )
   }
