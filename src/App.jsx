@@ -322,6 +322,13 @@ function App() {
     { id: 'soldout', label: '⚠️ Sold Out / Closed', emoji: '⚠️', description: 'Closed' },
   ]
 
+  // 브라우저 스크롤 복원 비활성화
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual'
+    }
+  }, [])
+
   // Leaflet 기본 아이콘 설정 (이미지 경로 문제 해결) - 모든 훅은 조건부 렌더링 이전에 위치해야 함
   useEffect(() => {
     // @ts-ignore - Leaflet 타입 정의 문제 해결
@@ -1925,7 +1932,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   return (
     <div id="post-detail-view" className="min-h-screen bg-black text-white flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 p-4 border-b border-gray-800 flex-shrink-0">
+      <div id="post-detail-header" className="flex items-center gap-3 p-4 border-b border-gray-800 flex-shrink-0">
         <button
           onClick={(e) => {
             e.stopPropagation()

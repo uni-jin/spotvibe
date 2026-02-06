@@ -1,10 +1,15 @@
 @import "tailwindcss";
 
 /* 여기에 추가하고 싶은 기본 스타일을 적으세요 */
+html {
+  scroll-behavior: auto !important;
+}
+
 body {
   background-color: #000;
   color: #fff;
   font-family: sans-serif;
+  scroll-behavior: auto !important;
 }
 
 /* Toast Animation */
