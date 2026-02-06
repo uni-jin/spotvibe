@@ -1558,10 +1558,17 @@ function App() {
                             </div>
                           </div>
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
                               // 원본 포스트 데이터 찾기 (클러스터링된 데이터가 아닌 원본)
-                              const originalPost = vibePosts.find(p => p.id === item.id) || item
-                              handlePostClick(originalPost)
+                              const originalPost = vibePosts.find(p => p.id === item.id)
+                              if (originalPost) {
+                                handlePostClick(originalPost)
+                              } else {
+                                // 원본을 찾지 못하면 item 자체를 사용 (이미 원본 포스트의 속성이 포함되어 있음)
+                                handlePostClick(item)
+                              }
                               setSelectedPin(null)
                             }}
                             className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors"
