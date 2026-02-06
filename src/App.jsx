@@ -1016,7 +1016,7 @@ function App() {
                   <div
                     key={post.id}
                     onClick={() => handlePostClick(post)}
-                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col h-full ${
+                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col ${
                       spotFilter === post.placeId ? 'ring-2 ring-[#ADFF2F]/50' : ''
                     }`}
                   >
@@ -1080,12 +1080,12 @@ function App() {
                         onClick={(e) => handleToggleLike(post.id, e)}
                         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
                           postLikes[post.id]?.liked
-                            ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border border-[#ADFF2F]'
-                            : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-[#ADFF2F]/50'
+                            ? 'bg-red-500/20 text-red-500 border border-red-500'
+                            : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-red-500/50'
                         }`}
                       >
                         <svg 
-                          className={`w-4 h-4 ${postLikes[post.id]?.liked ? 'fill-[#ADFF2F]' : 'fill-none'}`} 
+                          className={`w-4 h-4 ${postLikes[post.id]?.liked ? 'fill-red-500' : 'fill-none'}`} 
                           stroke="currentColor" 
                           viewBox="0 0 24 24"
                         >
@@ -1908,12 +1908,12 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
               onClick={(e) => onToggleLike(post.id, e)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
                 postLikes[post.id]?.liked
-                  ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border border-[#ADFF2F]'
-                  : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-[#ADFF2F]/50'
+                  ? 'bg-red-500/20 text-red-500 border border-red-500'
+                  : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-red-500/50'
               }`}
             >
               <svg 
-                className={`w-5 h-5 ${postLikes[post.id]?.liked ? 'fill-[#ADFF2F]' : 'fill-none'}`} 
+                className={`w-5 h-5 ${postLikes[post.id]?.liked ? 'fill-red-500' : 'fill-none'}`} 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
               >
