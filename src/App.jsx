@@ -351,9 +351,17 @@ function App() {
 
   const handlePostClick = (post) => {
     // 포스트 클릭 시 Detail View로 전환
+    if (!post || !post.id) {
+      console.error('Invalid post object:', post)
+      return
+    }
+    
+    // 원본 포스트 데이터 확인 (vibePosts에서 찾기)
+    const originalPost = vibePosts.find(p => p.id === post.id) || post
+    
     // 브라우저 히스토리에 추가
-    window.history.pushState({ view: 'post-detail', postId: post.id }, '', `#post-${post.id}`)
-    setSelectedPost(post)
+    window.history.pushState({ view: 'post-detail', postId: originalPost.id }, '', `#post-${originalPost.id}`)
+    setSelectedPost(originalPost)
     setCurrentView('post-detail')
   }
   
@@ -1464,7 +1472,14 @@ function App() {
   }
 
   // Post Detail View
-  if (currentView === 'post-detail' && selectedPost) {
+  if (currentView === 'post-detail') {
+    if (!selectedPost) {
+      // selectedPost가 없으면 Feed로 리다이렉트
+      console.warn('No post selected, redirecting to feed')
+      setCurrentView('feed')
+      return null
+    }
+    
     return (
       <PostDetailView
         post={selectedPost}
@@ -1654,8 +1669,26 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const [isSwiping, setIsSwiping] = useState(false)
   const [userProfile, setUserProfile] = useState(null)
   
-  const allImages = post.images || [post.image]
-  const vibeInfo = getVibeInfo(post.vibe)
+  // Post 데이터 검증
+  if (!post) {
+    console.error('PostDetailView: post is null or undefined')
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-400 mb-4">Post not found</p>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    )
+  }
+  
+  const allImages = post.images || (post.image ? [post.image] : [])
+  const vibeInfo = getVibeInfo(post.vibe || 'quiet')
   
   // 사용자 프로필 정보 로드
   useEffect(() => {
