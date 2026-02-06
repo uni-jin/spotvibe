@@ -118,6 +118,34 @@ body {
   0%, 100% {
     opacity: 1;
   }
+}
+
+/* Masonry Layout Support */
+@supports (column-count: 2) {
+  .masonry-columns {
+    column-count: 2;
+    column-gap: 0.75rem;
+  }
+  
+  .masonry-item {
+    break-inside: avoid;
+    margin-bottom: 0.75rem;
+    display: inline-block;
+    width: 100%;
+  }
+}
+
+/* Fallback for browsers that don't support columns */
+@supports not (column-count: 2) {
+  .masonry-columns {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+  
+  .masonry-item {
+    display: block;
+  }
   50% {
     opacity: .5;
   }

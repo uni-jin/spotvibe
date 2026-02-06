@@ -4,6 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
+import Masonry from 'react-masonry-css'
 import { auth, db } from './lib/supabase'
 
 function App() {
@@ -1000,7 +1001,14 @@ function App() {
               </button>
             </div>
           ) : filteredPosts.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3">
+            <Masonry
+              breakpointCols={{
+                default: 2,
+                640: 2,
+              }}
+              className="flex -ml-3 w-auto"
+              columnClassName="pl-3 bg-clip-padding"
+            >
               {filteredPosts.map((post, index) => {
                 const vibeInfo = getVibeInfo(post.vibe)
                 
@@ -1016,7 +1024,7 @@ function App() {
                   <div
                     key={post.id}
                     onClick={() => handlePostClick(post)}
-                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col ${
+                    className={`bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-[#ADFF2F]/50 transition-all duration-300 cursor-pointer flex flex-col mb-3 ${
                       spotFilter === post.placeId ? 'ring-2 ring-[#ADFF2F]/50' : ''
                     }`}
                   >
@@ -1099,7 +1107,7 @@ function App() {
                   </div>
                 )
               })}
-            </div>
+            </Masonry>
           ) : (
             <div className="text-center py-12">
               <p className="text-gray-400">No posts found</p>
