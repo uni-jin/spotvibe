@@ -444,10 +444,13 @@ function App() {
 
   // 삭제 확인 모달 열기
   const handleOpenDeleteConfirm = (postId) => {
+    console.log('handleOpenDeleteConfirm called with postId:', postId)
     if (!user?.id) {
+      console.log('User not logged in, showing login modal')
       setShowLoginModal(true)
       return
     }
+    console.log('Setting postToDelete and showing delete confirm modal')
     setPostToDelete(postId)
     setShowDeleteConfirmModal(true)
   }
@@ -1763,7 +1766,14 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   
   // 페이지 로드 시 스크롤을 최상단으로 이동
   useEffect(() => {
-    window.scrollTo(0, 0)
+    // DOM이 완전히 렌더링된 후 스크롤 이동
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      // 추가 보장을 위해 한 번 더 실행
+      setTimeout(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      }, 0)
+    })
   }, [])
 
   // 사용자 프로필 정보 로드
@@ -1904,10 +1914,15 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         {user?.id && (post.userId === user.id || post.user === user.id) && (
           <button
             onClick={(e) => {
+              console.log('Delete button clicked, postId:', post.id)
               e.stopPropagation()
               e.preventDefault()
+              console.log('onDeletePost prop:', onDeletePost)
               if (onDeletePost) {
+                console.log('Calling onDeletePost with postId:', post.id)
                 onDeletePost(post.id)
+              } else {
+                console.error('onDeletePost is not defined!')
               }
             }}
             className="p-2 hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0 text-red-400"
