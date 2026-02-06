@@ -893,6 +893,36 @@ function App() {
     return `${Math.floor(hours / 24)}d ago`
   }
 
+  // 촬영 시간을 최신성에 따라 포맷팅 (라벨 없이 시간 정보만)
+  const formatCapturedTimeWithRecency = (date) => {
+    if (!date) return ''
+    
+    const capturedDate = new Date(date)
+    const now = new Date()
+    const diffMinutes = Math.floor((now.getTime() - capturedDate.getTime()) / 60000)
+    
+    // 1시간 이내: 상대 시간 표시
+    if (diffMinutes < 60) {
+      return getTimeAgo(capturedDate)
+    }
+    
+    // 오늘: "Today {time}"
+    const today = new Date()
+    if (capturedDate.toDateString() === today.toDateString()) {
+      return `Today ${formatCapturedTime(capturedDate)}`
+    }
+    
+    // 어제: "Yesterday {time}"
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    if (capturedDate.toDateString() === yesterday.toDateString()) {
+      return `Yesterday ${formatCapturedTime(capturedDate)}`
+    }
+    
+    // 그 이전: "{date} {time}"
+    return `${formatDate(capturedDate)} ${formatCapturedTime(capturedDate)}`
+  }
+
   const getVibeInfo = (vibeId) => {
     return vibeOptions.find((v) => v.id === vibeId) || vibeOptions[0]
   }
