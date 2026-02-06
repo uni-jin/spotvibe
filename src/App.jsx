@@ -366,8 +366,10 @@ function App() {
       return
     }
     
-    // 스크롤을 최상단으로 이동 (뷰 전환 전)
-    window.scrollTo(0, 0)
+    // 스크롤을 최상단으로 강제 이동 (뷰 전환 전)
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    document.documentElement.scrollTop = 0
+    document.body.scrollTop = 0
     
     // 원본 포스트 데이터 확인 (vibePosts에서 찾기)
     const originalPost = vibePosts.find(p => p.id === post.id) || post
@@ -376,6 +378,13 @@ function App() {
     window.history.pushState({ view: 'post-detail', postId: originalPost.id }, '', `#post-${originalPost.id}`)
     setSelectedPost(originalPost)
     setCurrentView('post-detail')
+    
+    // 뷰 전환 후에도 스크롤 위치 보장
+    setTimeout(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+    }, 0)
   }
   
   const handleClosePostDetail = () => {
@@ -1785,27 +1794,47 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const allImages = post.images || (post.image ? [post.image] : [])
   const vibeInfo = getVibeInfo(post.vibe || 'quiet')
   
-  // 페이지 로드 시 스크롤을 최상단으로 이동
+  // 페이지 로드 시 스크롤을 최상단으로 강제 이동
   useEffect(() => {
-    // 즉시 최상단 요소로 스크롤 이동
-    const scrollToTop = () => {
-      const element = document.getElementById('post-detail-view')
-      if (element) {
-        element.scrollIntoView({ behavior: 'instant', block: 'start' })
-      } else {
-        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    // 강제 스크롤 함수 - 모든 방법을 시도
+    const forceScrollToTop = () => {
+      // 방법 1: window.scrollTo
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      
+      // 방법 2: documentElement와 body 직접 설정
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0
+      }
+      if (document.body) {
+        document.body.scrollTop = 0
+      }
+      
+      // 방법 3: 헤더 요소로 스크롤
+      const headerElement = document.getElementById('post-detail-header')
+      if (headerElement) {
+        headerElement.scrollIntoView({ behavior: 'instant', block: 'start' })
+      }
+      
+      // 방법 4: 최상위 요소로 스크롤
+      const viewElement = document.getElementById('post-detail-view')
+      if (viewElement) {
+        viewElement.scrollIntoView({ behavior: 'instant', block: 'start' })
       }
     }
     
-    // 즉시 실행
-    scrollToTop()
+    // 즉시 실행 (여러 번)
+    forceScrollToTop()
+    forceScrollToTop() // 한 번 더
     
     // DOM이 완전히 렌더링된 후 스크롤 이동
     requestAnimationFrame(() => {
-      scrollToTop()
-      // 추가 보장을 위해 한 번 더 실행
+      forceScrollToTop()
+      // 추가 보장을 위해 여러 번 실행
       setTimeout(() => {
-        scrollToTop()
+        forceScrollToTop()
+        setTimeout(() => {
+          forceScrollToTop()
+        }, 10)
       }, 0)
     })
     
@@ -1820,7 +1849,10 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         if (loadedCount === totalImages) {
           // 모든 이미지 로드 완료 후 스크롤 재조정
           setTimeout(() => {
-            scrollToTop()
+            forceScrollToTop()
+            setTimeout(() => {
+              forceScrollToTop()
+            }, 50)
           }, 100)
         }
       }
@@ -1829,11 +1861,24 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         if (img.complete) {
           checkScroll()
         } else {
-          img.addEventListener('load', checkScroll)
-          img.addEventListener('error', checkScroll)
+          img.addEventListener('load', checkScroll, { once: true })
+          img.addEventListener('error', checkScroll, { once: true })
         }
       })
     }
+    
+    // 추가 안전장치: 주기적으로 스크롤 위치 확인 및 조정
+    const scrollCheckInterval = setInterval(() => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
+      if (scrollTop > 50) {
+        forceScrollToTop()
+      }
+    }, 100)
+    
+    // 1초 후 인터벌 제거
+    setTimeout(() => {
+      clearInterval(scrollCheckInterval)
+    }, 1000)
   }, [])
 
   // 사용자 프로필 정보 로드
