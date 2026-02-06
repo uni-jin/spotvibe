@@ -1562,17 +1562,26 @@ function App() {
     }
     
     return (
-      <PostDetailView
-        post={selectedPost}
-        onClose={handleClosePostDetail}
-        formatCapturedTime={formatCapturedTime}
-        formatDate={formatDate}
-        getVibeInfo={getVibeInfo}
-        postLikes={postLikes}
-        onToggleLike={handleToggleLike}
-        user={user}
-        onDeletePost={handleOpenDeleteConfirm}
-      />
+      <>
+        <PostDetailView
+          post={selectedPost}
+          onClose={handleClosePostDetail}
+          formatCapturedTime={formatCapturedTime}
+          formatDate={formatDate}
+          getVibeInfo={getVibeInfo}
+          postLikes={postLikes}
+          onToggleLike={handleToggleLike}
+          user={user}
+          onDeletePost={handleOpenDeleteConfirm}
+        />
+        {/* Delete Confirm Modal - PostDetailView와 함께 렌더링 */}
+        {showDeleteConfirmModal && postToDelete && (
+          <DeleteConfirmModal
+            onClose={handleCloseDeleteConfirm}
+            onConfirm={() => handleDeletePost(postToDelete)}
+          />
+        )}
+      </>
     )
   }
 
@@ -1773,20 +1782,30 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   
   // 페이지 로드 시 스크롤을 최상단으로 이동
   useEffect(() => {
-    // 즉시 스크롤 이동
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    // 즉시 최상단 요소로 스크롤 이동
+    const scrollToTop = () => {
+      const element = document.getElementById('post-detail-view')
+      if (element) {
+        element.scrollIntoView({ behavior: 'instant', block: 'start' })
+      } else {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      }
+    }
+    
+    // 즉시 실행
+    scrollToTop()
     
     // DOM이 완전히 렌더링된 후 스크롤 이동
     requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      scrollToTop()
       // 추가 보장을 위해 한 번 더 실행
       setTimeout(() => {
-        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+        scrollToTop()
       }, 0)
     })
     
     // 이미지 로드 후에도 스크롤 위치 재조정
-    const images = document.querySelectorAll('img')
+    const images = document.querySelectorAll('#post-detail-view img')
     let loadedCount = 0
     const totalImages = images.length
     
@@ -1796,7 +1815,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         if (loadedCount === totalImages) {
           // 모든 이미지 로드 완료 후 스크롤 재조정
           setTimeout(() => {
-            window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+            scrollToTop()
           }, 100)
         }
       }
