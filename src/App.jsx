@@ -359,6 +359,9 @@ function App() {
       return
     }
     
+    // 스크롤을 최상단으로 이동 (뷰 전환 전)
+    window.scrollTo(0, 0)
+    
     // 원본 포스트 데이터 확인 (vibePosts에서 찾기)
     const originalPost = vibePosts.find(p => p.id === post.id) || post
     
