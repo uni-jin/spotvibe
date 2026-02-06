@@ -19,6 +19,7 @@ function App() {
   const [postAdditionalImages, setPostAdditionalImages] = useState([])
   const [postMetadata, setPostMetadata] = useState(null)
   const [showToast, setShowToast] = useState(false)
+  const [toastMessage, setToastMessage] = useState('')
   const [vibePosts, setVibePosts] = useState([])
   const [isPosting, setIsPosting] = useState(false) // Post Vibe 업로드 중 상태
   const [mapZoom, setMapZoom] = useState(1) // 1 = 클러스터, 2 = 개별 핀
@@ -480,9 +481,11 @@ function App() {
       handleClosePostDetail()
       
       // 성공 메시지
+      setToastMessage('Post deleted successfully! 🗑️')
       setShowToast(true)
       setTimeout(() => {
         setShowToast(false)
+        setToastMessage('')
       }, 3000)
     } catch (error) {
       console.error('Error deleting post:', error)
@@ -817,9 +820,11 @@ function App() {
 
       setVibePosts([newPost, ...vibePosts])
       handleCloseModal()
+      setToastMessage('Vibe Posted Successfully! 🎉')
       setShowToast(true)
       setTimeout(() => {
         setShowToast(false)
+        setToastMessage('')
       }, 3000)
     } catch (error) {
       console.error('Error posting vibe:', error)
@@ -1240,9 +1245,9 @@ function App() {
         )}
 
         {/* Toast Message */}
-        {showToast && (
+        {showToast && toastMessage && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-[#ADFF2F] text-black px-6 py-3 rounded-full font-semibold shadow-lg z-50 animate-fade-in">
-            Vibe Posted Successfully! 🎉
+            {toastMessage}
           </div>
         )}
 
