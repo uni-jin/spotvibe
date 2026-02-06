@@ -2475,11 +2475,11 @@ function DeleteConfirmModal({ onClose, onConfirm }) {
   return (
     <>
       <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50"
+        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[9999]"
         onClick={onClose}
       />
       
-      <div className="fixed left-4 right-4 bottom-4 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 p-6 md:p-8">
+      <div className="fixed left-4 right-4 bottom-4 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-[10000] p-6 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold">Delete Post</h2>
           <button
