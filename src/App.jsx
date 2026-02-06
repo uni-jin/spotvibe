@@ -451,8 +451,13 @@ function App() {
       return
     }
     console.log('Setting postToDelete and showing delete confirm modal')
+    console.log('Current showDeleteConfirmModal state:', showDeleteConfirmModal)
     setPostToDelete(postId)
     setShowDeleteConfirmModal(true)
+    // 상태 업데이트 확인을 위한 추가 로그
+    setTimeout(() => {
+      console.log('After setState - showDeleteConfirmModal should be true')
+    }, 0)
   }
 
   // 삭제 확인 모달 닫기
@@ -1217,12 +1222,14 @@ function App() {
           />
         )}
 
-        {/* Delete Confirm Modal */}
+        {/* Delete Confirm Modal - 높은 z-index로 모든 뷰 위에 표시 */}
         {showDeleteConfirmModal && postToDelete && (
-          <DeleteConfirmModal
-            onClose={handleCloseDeleteConfirm}
-            onConfirm={() => handleDeletePost(postToDelete)}
-          />
+          <div style={{ position: 'fixed', zIndex: 10000 }}>
+            <DeleteConfirmModal
+              onClose={handleCloseDeleteConfirm}
+              onConfirm={() => handleDeletePost(postToDelete)}
+            />
+          </div>
         )}
 
         {/* Post Vibe Modal */}
@@ -1766,6 +1773,9 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   
   // 페이지 로드 시 스크롤을 최상단으로 이동
   useEffect(() => {
+    // 즉시 스크롤 이동
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    
     // DOM이 완전히 렌더링된 후 스크롤 이동
     requestAnimationFrame(() => {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
@@ -1774,6 +1784,32 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
       }, 0)
     })
+    
+    // 이미지 로드 후에도 스크롤 위치 재조정
+    const images = document.querySelectorAll('img')
+    let loadedCount = 0
+    const totalImages = images.length
+    
+    if (totalImages > 0) {
+      const checkScroll = () => {
+        loadedCount++
+        if (loadedCount === totalImages) {
+          // 모든 이미지 로드 완료 후 스크롤 재조정
+          setTimeout(() => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+          }, 100)
+        }
+      }
+      
+      images.forEach(img => {
+        if (img.complete) {
+          checkScroll()
+        } else {
+          img.addEventListener('load', checkScroll)
+          img.addEventListener('error', checkScroll)
+        }
+      })
+    }
   }, [])
 
   // 사용자 프로필 정보 로드
