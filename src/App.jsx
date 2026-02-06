@@ -34,6 +34,8 @@ function App() {
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false) // 삭제 확인 모달 표시 여부
+  const [postToDelete, setPostToDelete] = useState(null) // 삭제할 포스트 ID
 
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
@@ -436,14 +438,25 @@ function App() {
     }
   }
 
+  // 삭제 확인 모달 열기
+  const handleOpenDeleteConfirm = (postId) => {
+    if (!user?.id) {
+      setShowLoginModal(true)
+      return
+    }
+    setPostToDelete(postId)
+    setShowDeleteConfirmModal(true)
+  }
+
+  // 삭제 확인 모달 닫기
+  const handleCloseDeleteConfirm = () => {
+    setShowDeleteConfirmModal(false)
+    setPostToDelete(null)
+  }
+
   // 포스팅 삭제 함수
   const handleDeletePost = async (postId) => {
     if (!user?.id) {
-      alert('You must be logged in to delete posts.')
-      return
-    }
-
-    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
       return
     }
 
@@ -460,6 +473,9 @@ function App() {
         return newLikes
       })
       
+      // 삭제 확인 모달 닫기
+      handleCloseDeleteConfirm()
+      
       // 상세 화면 닫고 Feed로 이동
       handleClosePostDetail()
       
@@ -470,6 +486,7 @@ function App() {
       }, 3000)
     } catch (error) {
       console.error('Error deleting post:', error)
+      handleCloseDeleteConfirm()
       alert(error.message || 'Failed to delete post. Please try again.')
     }
   }
@@ -1862,11 +1879,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         {/* 삭제 버튼 (본인 포스팅만) */}
         {user?.id && (post.userId === user.id || post.user === user.id) && (
           <button
-            onClick={() => {
-              if (confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
-                onDeletePost(post.id)
-              }
-            }}
+            onClick={() => onDeletePost(post.id)}
             className="p-2 hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0 text-red-400"
             title="Delete post"
           >
