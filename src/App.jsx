@@ -1758,6 +1758,11 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const allImages = post.images || (post.image ? [post.image] : [])
   const vibeInfo = getVibeInfo(post.vibe || 'quiet')
   
+  // 페이지 로드 시 스크롤을 최상단으로 이동
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
+
   // 사용자 프로필 정보 로드
   useEffect(() => {
     const loadUserProfile = async () => {
