@@ -1222,14 +1222,12 @@ function App() {
           />
         )}
 
-        {/* Delete Confirm Modal - 높은 z-index로 모든 뷰 위에 표시 */}
-        {showDeleteConfirmModal && postToDelete && (
-          <div style={{ position: 'fixed', zIndex: 10000 }}>
-            <DeleteConfirmModal
-              onClose={handleCloseDeleteConfirm}
-              onConfirm={() => handleDeletePost(postToDelete)}
-            />
-          </div>
+        {/* Delete Confirm Modal - 다른 뷰에서 사용 (post-detail이 아닐 때) */}
+        {currentView !== 'post-detail' && showDeleteConfirmModal && postToDelete && (
+          <DeleteConfirmModal
+            onClose={handleCloseDeleteConfirm}
+            onConfirm={() => handleDeletePost(postToDelete)}
+          />
         )}
 
         {/* Post Vibe Modal */}
@@ -1925,7 +1923,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
+    <div id="post-detail-view" className="min-h-screen bg-black text-white flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 p-4 border-b border-gray-800 flex-shrink-0">
         <button
