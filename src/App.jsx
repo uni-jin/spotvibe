@@ -1861,7 +1861,10 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       {/* Header */}
       <div className="flex items-center gap-3 p-4 border-b border-gray-800 flex-shrink-0">
         <button
-          onClick={onClose}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
           className="p-2 hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1897,7 +1900,13 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
         {/* 삭제 버튼 (본인 포스팅만) */}
         {user?.id && (post.userId === user.id || post.user === user.id) && (
           <button
-            onClick={() => onDeletePost(post.id)}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              if (onDeletePost) {
+                onDeletePost(post.id)
+              }
+            }}
             className="p-2 hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0 text-red-400"
             title="Delete post"
           >
