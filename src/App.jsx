@@ -62,17 +62,15 @@ function App() {
   ]
 
   // 지역 선택 상태 복원 (새로고침 시 유지)
+  // - 이전에는 여기서 currentView를 'feed'로 강제로 변경했지만,
+  //   이는 초기 진입 시 Home 화면이 보이지 않거나 뷰 전환이 꼬이는 원인이 되었음.
+  // - 지금은 선택된 지역만 복원하고, 화면 전환은 사용자의 명시적인 액션(지역 카드 클릭, 하단 네비 등)에만 맡김.
   useEffect(() => {
     const savedRegionId = localStorage.getItem('selectedRegionId')
     if (savedRegionId) {
       const savedRegion = regions.find((r) => r.id === savedRegionId)
       if (savedRegion && savedRegion.active) {
-        // selectedRegion과 currentView를 동시에 설정하여 동기화 보장
         setSelectedRegion(savedRegion)
-        // 다음 렌더링 사이클에서 currentView 변경 (selectedRegion이 설정된 후)
-        requestAnimationFrame(() => {
-          setCurrentView('feed')
-        })
       }
     }
   }, [])
@@ -87,27 +85,6 @@ function App() {
     }
     fetchUserLocation()
   }, [])
-
-  // currentView가 예상치 못한 값이면 home으로 리다이렉트 (Hook은 조건부 렌더링 이전에 위치)
-  useEffect(() => {
-    if (currentView !== 'home' && currentView !== 'feed' && currentView !== 'map' && 
-        currentView !== 'quest' && currentView !== 'my' && currentView !== 'post-detail') {
-      setCurrentView('home')
-    }
-  }, [currentView])
-
-  // Feed 뷰에서 selectedRegion이 없으면 home으로 리다이렉트 (Hook은 조건부 렌더링 이전에 위치)
-  // localStorage 복원 중이 아닐 때만 리다이렉트 (무한 루프 방지)
-  useEffect(() => {
-    if (currentView === 'feed' && !selectedRegion) {
-      // localStorage에 저장된 region이 있는지 확인
-      const savedRegionId = localStorage.getItem('selectedRegionId')
-      if (!savedRegionId) {
-        // localStorage에 저장된 region이 없을 때만 home으로 리다이렉트
-        setCurrentView('home')
-      }
-    }
-  }, [currentView, selectedRegion])
 
   // 브라우저 뒤로가기 처리
   useEffect(() => {
@@ -527,6 +504,24 @@ function App() {
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
     })
   }, [])
+
+  // Feed 뷰 언마운트 시 스크롤 위치 초기화
+  // - 모든 훅은 조건부 렌더링(if currentView === '...') 이전에 위치해야 하므로 여기서 호출
+  useEffect(() => {
+    if (currentView !== 'feed') return
+    
+    return () => {
+      // Feed 뷰가 언마운트될 때 스크롤 위치를 초기화하여
+      // 다음 뷰(PostDetailView 등)로 전환 시 스크롤 위치가 유지되지 않도록 함
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0
+      }
+      if (document.body) {
+        document.body.scrollTop = 0
+      }
+    }
+  }, [currentView])
 
   const handleRegionClick = (region) => {
     if (region.active) {
@@ -1233,7 +1228,7 @@ function App() {
 
   // Home View - Region Selector
   if (currentView === 'home') {
-    return (
+  return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-4 py-12 pb-24">
         {/* Header */}
         <div className="text-center mb-16 space-y-4">
@@ -1297,24 +1292,6 @@ function App() {
       </div>
     )
   }
-
-  // Feed View
-  // Feed 뷰 언마운트 시 스크롤 위치 저장 방지 (Hook은 조건문 밖에서 호출)
-  useEffect(() => {
-    if (currentView !== 'feed') return
-    
-    return () => {
-      // Feed 뷰가 언마운트될 때 스크롤 위치를 초기화하여
-      // 다음 뷰(PostDetailView)로 전환 시 스크롤 위치가 유지되지 않도록 함
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-      if (document.documentElement) {
-        document.documentElement.scrollTop = 0
-      }
-      if (document.body) {
-        document.body.scrollTop = 0
-      }
-    }
-  }, [currentView])
 
   if (currentView === 'feed') {
     // selectedRegion이 없으면 로딩 화면 표시
@@ -2374,6 +2351,11 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
     }
     loadUserProfile()
   }, [post?.userId, post?.user])
+  
+  // 포스트 이미지 목록 (메인 + 추가 이미지)
+  const allImages = post
+    ? (post.images || (post.image ? [post.image] : []))
+    : []
   
   // Get all capture times
   const getCaptureTime = (index) => {

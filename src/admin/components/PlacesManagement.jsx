@@ -575,20 +575,6 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
     return null
   }
   
-  // Map center sync component (직접 좌표 입력 시에만 지도 중심 이동)
-  const MapCenterSync = () => {
-    const map = useMap()
-    
-    useEffect(() => {
-      // mapCenter가 변경되었을 때만 지도 중심 이동 (직접 좌표 입력 시)
-      if (mapCenter[0] !== map.getCenter().lat || mapCenter[1] !== map.getCenter().lng) {
-        map.setView(mapCenter, mapZoom, { animate: true, duration: 0.3 })
-      }
-    }, [mapCenter, mapZoom, map])
-    
-    return null
-  }
-
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -807,7 +793,6 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
                   className="dark-tiles"
                 />
                 <MapClickHandler />
-                <MapCenterSync />
                 {markerPosition && (
                   <Marker
                     position={markerPosition}
