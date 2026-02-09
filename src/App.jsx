@@ -410,8 +410,8 @@ function App() {
     }
   }, [showLoginModal])
 
-  // Post Vibe 모달에서 사용할 장소 목록 (hotSpots에서 가져오고 '기타' 옵션 추가)
-  const places = [...hotSpots.map(spot => spot.name), '기타']
+  // Post Vibe 모달에서 사용할 장소 목록 (hotSpots에서 가져오고 'Other' 옵션 추가)
+  const places = [...hotSpots.map(spot => spot.name), 'Other']
   const vibeOptions = [
     { id: 'verybusy', label: '🔥 Very Busy', emoji: '🔥', description: '40min+' },
     { id: 'busy', label: '⏱️ Busy', emoji: '⏱️', description: '10-20min' },
