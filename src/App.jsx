@@ -96,6 +96,13 @@ function App() {
     }
   }, [currentView])
 
+  // Feed 뷰에서 selectedRegion이 없으면 home으로 리다이렉트 (Hook은 조건부 렌더링 이전에 위치)
+  useEffect(() => {
+    if (currentView === 'feed' && !selectedRegion) {
+      setCurrentView('home')
+    }
+  }, [currentView, selectedRegion])
+
   // 브라우저 뒤로가기 처리
   useEffect(() => {
     const handlePopState = (event) => {
@@ -1304,10 +1311,17 @@ function App() {
   }, [currentView])
 
   if (currentView === 'feed') {
-    // selectedRegion이 없으면 home으로 리다이렉트
+    // selectedRegion이 없으면 home 뷰를 렌더링 (조건부 return 제거하여 Hook 순서 보장)
     if (!selectedRegion) {
-      setCurrentView('home')
-      return null
+      // home 뷰로 리다이렉트되도록 하기 위해 home 뷰를 렌더링
+      // (useEffect에서 이미 처리하지만, 즉시 반영을 위해)
+      return (
+        <div className="min-h-screen bg-black text-white flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-400">Redirecting...</p>
+          </div>
+        </div>
+      )
     }
     
     const filteredPosts = getFilteredPosts()
