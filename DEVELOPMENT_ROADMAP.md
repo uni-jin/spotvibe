@@ -5,8 +5,11 @@
 - ✅ 구글 로그인 기능 활성화
 - ✅ Post Vibe 모달 UI 완성
 - ✅ MY 페이지 프로필 화면
-- ⏳ 데이터베이스 연동 (진행 예정)
-- ⏳ 실제 Post Vibe 기능 (진행 예정)
+- ✅ 데이터베이스 연동 완료
+- ✅ 실제 Post Vibe 기능 완료 (이미지 업로드, Supabase 저장)
+- ✅ 좋아요 기능, 포스트 삭제 기능
+- ✅ 포스트 설명 기능
+- ✅ 촬영 일시 표시 개선
 
 ## 🎯 Phase 1: 팝업스토어 집중 개발
 
@@ -20,54 +23,54 @@
 
 ## 📝 작업 순서
 
-### 1단계: 데이터베이스 스키마 수정 및 준비
+### ✅ 1단계: 데이터베이스 스키마 수정 및 준비 (완료)
 **목표:** 팝업스토어 타입 구분을 위한 스키마 수정
 
-- [ ] `places` 테이블에 `type` 필드 추가 (예: 'popup_store', 'cafe', 'restaurant' 등)
-- [ ] `places` 테이블에 `is_active` 필드 추가 (활성/비활성 팝업스토어 구분)
-- [ ] 기존 seed 데이터에 type 정보 추가
-- [ ] 마이그레이션 파일 생성 및 실행
+- [x] `places` 테이블에 `type` 필드 추가 (예: 'popup_store', 'cafe', 'restaurant' 등)
+- [x] `places` 테이블에 `is_active` 필드 추가 (활성/비활성 팝업스토어 구분)
+- [x] 기존 seed 데이터에 type 정보 추가
+- [x] 마이그레이션 파일 생성 및 실행
 
 **파일:**
-- `supabase/migrations/004_add_place_type.sql` 생성
+- `supabase/migrations/004_add_place_type.sql` ✅
 
 ---
 
-### 2단계: Post Vibe 기능 - Supabase 연동
+### ✅ 2단계: Post Vibe 기능 - Supabase 연동 (완료)
 **목표:** Post Vibe 시 실제로 Supabase에 저장
 
-- [ ] Supabase Storage 버킷 생성 (`post-images`)
-- [ ] 이미지 업로드 기능 구현 (`src/lib/supabase.js`의 `uploadImage` 함수)
-- [ ] `handlePostVibe` 함수 수정하여 Supabase에 저장
+- [x] Supabase Storage 버킷 생성 (`post-images`)
+- [x] 이미지 업로드 기능 구현 (`src/lib/supabase.js`의 `uploadImage` 함수)
+- [x] `handlePostVibe` 함수 수정하여 Supabase에 저장
   - 이미지 업로드 → URL 획득
   - `db.createPost()` 호출
   - 성공 시 로컬 state 업데이트
-- [ ] 에러 핸들링 및 로딩 상태 추가
-- [ ] 성공 토스트 메시지 개선
+- [x] 에러 핸들링 및 로딩 상태 추가
+- [x] 성공 토스트 메시지 개선
 
 **수정 파일:**
-- `src/App.jsx` - `handlePostVibe` 함수
-- `src/lib/supabase.js` - `uploadImage`, `createPost` 함수
+- `src/App.jsx` - `handlePostVibe` 함수 ✅
+- `src/lib/supabase.js` - `uploadImage`, `createPost` 함수 ✅
 
 ---
 
-### 3단계: 예시 데이터 삭제 및 실제 데이터 로드
+### ✅ 3단계: 예시 데이터 삭제 및 실제 데이터 로드 (완료)
 **목표:** Mock 데이터 제거하고 Supabase에서 실제 데이터 가져오기
 
-- [ ] `initialPosts` Mock 데이터 제거
-- [ ] `hotSpots` 하드코딩 데이터 제거
-- [ ] `useEffect`에서 Supabase에서 데이터 로드
+- [x] `initialPosts` Mock 데이터 제거
+- [x] `hotSpots` 하드코딩 데이터 제거
+- [x] `useEffect`에서 Supabase에서 데이터 로드
   - `db.getPosts()` 호출하여 포스트 가져오기
   - `db.getPlaces()` 호출하여 팝업스토어 목록 가져오기
-- [ ] 로딩 상태 추가
-- [ ] 에러 핸들링
+- [x] 로딩 상태 추가
+- [x] 에러 핸들링
 
 **수정 파일:**
-- `src/App.jsx` - 초기 데이터 로딩 로직
+- `src/App.jsx` - 초기 데이터 로딩 로직 ✅
 
 ---
 
-### 4단계: Hot Spots Now - 팝업스토어만 표시
+### 5단계: GPS 기반 거리 계산 및 정렬 (우선 작업)
 **목표:** Hot Spots Now 섹션에 팝업스토어만 필터링하여 표시
 
 - [ ] `db.getPlaces()` 호출 시 `type = 'popup_store'` 필터 추가
@@ -81,23 +84,58 @@
 
 ---
 
-### 5단계: GPS 기반 거리 계산 및 정렬
+### 5단계: GPS 기반 거리 계산 및 정렬 (우선 작업)
 **목표:** 사용자 위치 기준으로 가까운 팝업스토어 순서로 정렬
 
-- [ ] 브라우저 Geolocation API로 사용자 위치 가져오기
-- [ ] 거리 계산 함수 구현 (Haversine formula)
-- [ ] Hot Spots Now에서 거리순 정렬
-- [ ] 거리 표시 UI 추가 (예: "1.2km away")
-- [ ] 위치 권한 요청 및 거부 처리
-- [ ] 위치를 가져올 수 없을 때 기본 정렬 (최신순 등)
+**상세 작업 계획:**
+
+1. **유틸 함수 생성** (`src/utils/geolocation.js`)
+   - [ ] `getUserLocation()`: Geolocation API로 사용자 위치 가져오기
+     - `navigator.geolocation.getCurrentPosition()` 사용
+     - Promise 기반 반환
+     - 에러 핸들링 (권한 거부, 타임아웃 등)
+   - [ ] `calculateDistance(lat1, lng1, lat2, lng2)`: Haversine formula로 거리 계산
+     - 지구상 실제 거리 계산 (km 단위)
+     - 반환값: 거리 (숫자, km)
+   - [ ] `formatDistance(distance)`: 거리 포맷팅
+     - 1km 미만: "500m away"
+     - 1km 이상: "1.2km away"
+
+2. **App.jsx 수정**
+   - [ ] `userLocation` state 추가: `{ lat: number, lng: number } | null`
+   - [ ] `useEffect`에서 앱 로드 시 위치 요청
+     - 권한 요청 및 사용자 위치 저장
+     - 실패 시 에러 로그만 (사용자에게 강제하지 않음)
+   - [ ] `hotSpots` 정렬 로직 수정
+     - 위치가 있을 때: 거리순 정렬
+     - 위치가 없을 때: 기존 정렬 유지 (이름순)
+   - [ ] `hotSpots`에 `distance` 필드 추가 (표시용)
+
+3. **Hot Spots Now UI 수정** (1056-1097 라인)
+   - [ ] 거리 정보 표시
+     - 위치가 있을 때: "1.2km away" 표시
+     - 위치가 없을 때: 거리 정보 숨김
+   - [ ] 거리 정보 스타일링
+     - 작은 회색 텍스트로 표시
+     - 상태 정보 옆에 배치
+
+4. **에러 핸들링**
+   - [ ] 위치 권한 거부 시: 조용히 실패, 기본 정렬 사용
+   - [ ] 위치 가져오기 실패 시: 기본 정렬 사용
+   - [ ] 타임아웃 처리 (10초)
 
 **수정 파일:**
-- `src/App.jsx` - 위치 가져오기 및 정렬 로직
-- 새로운 유틸 함수 파일 생성 가능: `src/utils/geolocation.js`
+- `src/utils/geolocation.js` (새 파일 생성)
+- `src/App.jsx` - 위치 가져오기 및 정렬 로직, Hot Spots Now UI
+
+**참고사항:**
+- HTTPS 환경에서만 Geolocation API 작동
+- 사용자 경험: 위치 권한을 강제하지 않고, 제공되면 활용
+- 성능: 위치는 한 번만 가져오고 캐싱 (새로고침 시 재요청)
 
 ---
 
-### 6단계: 관리자 사이트 - 팝업스토어 등록
+### 6단계: 관리자 사이트 - 팝업스토어 등록 (5단계 이후)
 **목표:** 관리자가 팝업스토어를 등록/수정/삭제할 수 있는 사이트
 
 - [ ] 관리자 인증 시스템 (Supabase RLS 또는 별도 인증)
@@ -123,15 +161,17 @@
 
 ---
 
-### 7단계: Post Vibe - 장소 선택 개선
+### 7단계: Post Vibe - 장소 선택 개선 (6단계 이후)
 **목표:** Post Vibe 시 실제 팝업스토어 목록에서 선택
 
 - [ ] Post Vibe 모달의 장소 선택을 Supabase에서 가져온 팝업스토어 목록으로 변경
 - [ ] "기타" 옵션 유지 (직접 입력 가능)
-- [ ] 장소 선택 드롭다운에 거리 정보 표시 (선택사항)
+- [ ] 장소 선택 드롭다운에 거리 정보 표시 (5단계에서 구현한 거리 정보 활용)
 
 **수정 파일:**
 - `src/App.jsx` - `PostVibeModal` 컴포넌트
+
+**참고:** 관리자 사이트에서 팝업스토어 데이터를 먼저 입력한 후 진행
 
 ---
 
