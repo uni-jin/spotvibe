@@ -430,10 +430,10 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
 
     // Create official place using admin function
     const { data: newPlaceData, error: placeError } = await supabase.rpc('admin_save_place', {
-      p_id: null,
       p_name: placeData.name || customPlace.place_name,
-      p_name_en: placeData.name_en || null,
       p_type: placeData.type || customPlace.category_type || 'other',
+      p_id: null,
+      p_name_en: placeData.name_en || null,
       p_thumbnail_url: placeData.thumbnail_url || null,
       p_description: placeData.description || null,
       p_lat: placeData.lat ? parseFloat(placeData.lat) : null,
