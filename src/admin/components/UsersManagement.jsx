@@ -3,12 +3,18 @@ import { supabase } from '../../lib/supabase'
 
 const UsersManagement = () => {
   const [users, setUsers] = useState([])
+  const [filteredUsers, setFilteredUsers] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedUser, setSelectedUser] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     loadUsers()
   }, [])
+
+  useEffect(() => {
+    filterUsers()
+  }, [users, searchQuery])
 
   const loadUsers = async () => {
     try {
@@ -48,6 +54,20 @@ const UsersManagement = () => {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const filterUsers = () => {
+    if (!searchQuery.trim()) {
+      setFilteredUsers(users)
+      return
+    }
+
+    const query = searchQuery.toLowerCase()
+    const filtered = users.filter(user =>
+      user.name?.toLowerCase().includes(query) ||
+      user.email?.toLowerCase().includes(query)
+    )
+    setFilteredUsers(filtered)
   }
 
   const loadUserDetails = async (userId) => {
@@ -173,6 +193,30 @@ const UsersManagement = () => {
         <h2 className="text-2xl font-bold">회원관리</h2>
       </div>
 
+      {/* Search Filter */}
+      <div className="bg-gray-900 rounded-lg p-4 mb-6">
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-2 text-gray-300">검색</label>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="이름 또는 이메일로 검색..."
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={() => setSearchQuery('')}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white transition-colors"
+            >
+              초기화
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-gray-900 rounded-lg overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-800">
@@ -184,7 +228,8 @@ const UsersManagement = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
-            {users.map((user) => (
+            {filteredUsers.length > 0 ? (
+              filteredUsers.map((user) => (
               <tr key={user.id} className="hover:bg-gray-800/50">
                 <td className="px-6 py-4">
                   <div>
@@ -205,7 +250,14 @@ const UsersManagement = () => {
                   </button>
                 </td>
               </tr>
-            ))}
+            ))
+            ) : (
+              <tr>
+                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                  {users.length === 0 ? '등록된 회원이 없습니다.' : '검색 결과가 없습니다.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

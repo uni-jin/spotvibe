@@ -178,22 +178,86 @@ export const getCommonCodes = async (codeType = null) => {
 }
 
 /**
- * Get places (for admin)
+ * Get places (for admin) with recent post stats
  * @returns {Promise<Array>}
  */
 export const getAdminPlaces = async () => {
   try {
-    const { data, error } = await supabase
+    // Get all places
+    const { data: places, error: placesError } = await supabase
       .from('places')
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching places:', error)
+    if (placesError) {
+      console.error('Error fetching places:', placesError)
       return []
     }
 
-    return data || []
+    if (!places || places.length === 0) {
+      return []
+    }
+
+    // Get recent posts for each place
+    const placeIds = places.map(p => p.id)
+    const { data: posts, error: postsError } = await supabase
+      .from('posts')
+      .select('id, place_id, place_name, vibe, created_at, user_id')
+      .in('place_id', placeIds)
+      .order('created_at', { ascending: false })
+
+    if (postsError) {
+      console.error('Error fetching posts:', postsError)
+      // Return places without post stats if posts query fails
+      return places.map(place => ({
+        ...place,
+        recentVibe: null,
+        recentPostTime: null,
+        postCount: 0
+      }))
+    }
+
+    // Group posts by place_id
+    const postsByPlace = {}
+    posts.forEach(post => {
+      if (post.place_id) {
+        if (!postsByPlace[post.place_id]) {
+          postsByPlace[post.place_id] = []
+        }
+        postsByPlace[post.place_id].push(post)
+      }
+    })
+
+    // Get admin usernames for created_by (if exists)
+    const adminIds = [...new Set(places.map(p => p.created_by).filter(Boolean))]
+    let adminMap = {}
+    if (adminIds.length > 0) {
+      const { data: admins } = await supabase
+        .from('admin_accounts')
+        .select('id, username')
+        .in('id', adminIds)
+      
+      if (admins) {
+        adminMap = admins.reduce((acc, admin) => {
+          acc[admin.id] = admin.username
+          return acc
+        }, {})
+      }
+    }
+
+    // Combine places with post stats
+    return places.map(place => {
+      const placePosts = postsByPlace[place.id] || []
+      const latestPost = placePosts[0] || null
+      
+      return {
+        ...place,
+        recentVibe: latestPost?.vibe || null,
+        recentPostTime: latestPost?.created_at || null,
+        postCount: placePosts.length,
+        createdByUsername: place.created_by ? adminMap[place.created_by] : null
+      }
+    })
   } catch (error) {
     console.error('Error fetching places:', error)
     return []
