@@ -1028,7 +1028,7 @@ function App() {
 
   // Home View - Region Selector
   if (currentView === 'home') {
-  return (
+    return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-4 py-12 pb-24">
         {/* Header */}
         <div className="text-center mb-16 space-y-4">
