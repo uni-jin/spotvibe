@@ -500,49 +500,27 @@ export const savePlace = async (placeData, placeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    const placePayload = {
-      name: placeData.name,
-      name_en: placeData.name_en || null,
-      type: placeData.type,
-      thumbnail_url: placeData.thumbnail_url || null,
-      description: placeData.description || null,
-      lat: placeData.lat ? parseFloat(placeData.lat) : null,
-      lng: placeData.lng ? parseFloat(placeData.lng) : null,
-      is_active: placeData.is_active !== undefined ? placeData.is_active : true,
-      updated_at: new Date().toISOString()
+    // Use SECURITY DEFINER function to bypass RLS
+    const { data, error } = await supabase.rpc('admin_save_place', {
+      p_id: placeId,
+      p_name: placeData.name,
+      p_name_en: placeData.name_en || null,
+      p_type: placeData.type,
+      p_thumbnail_url: placeData.thumbnail_url || null,
+      p_description: placeData.description || null,
+      p_lat: placeData.lat ? parseFloat(placeData.lat) : null,
+      p_lng: placeData.lng ? parseFloat(placeData.lng) : null,
+      p_is_active: placeData.is_active !== undefined ? placeData.is_active : true,
+      p_region_id: placeData.region_id || null
+    })
+
+    if (error) {
+      console.error('Error saving place:', error)
+      return { success: false, error: error.message }
     }
 
-    let result
-    if (placeId) {
-      // Update existing place
-      const { data, error } = await supabase
-        .from('places')
-        .update(placePayload)
-        .eq('id', placeId)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Error updating place:', error)
-        return { success: false, error: error.message }
-      }
-
-      result = data
-    } else {
-      // Create new place
-      const { data, error } = await supabase
-        .from('places')
-        .insert(placePayload)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Error creating place:', error)
-        return { success: false, error: error.message }
-      }
-
-      result = data
-    }
+    // RPC returns array, get first element
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : data
 
     return { success: true, data: result }
   } catch (error) {

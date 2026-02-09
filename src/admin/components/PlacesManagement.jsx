@@ -478,7 +478,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         {/* Name */}
         <div>
           <label className="block text-sm font-medium mb-2 text-gray-300">
-            장소명 <span className="text-red-400">*</span>
+            장소명 (영문) <span className="text-red-400">*</span>
           </label>
           <input
             type="text"
@@ -486,7 +486,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
             onChange={(e) => handleInputChange('name', e.target.value)}
             required
             className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-            placeholder="예: 디올 성수"
+            placeholder="예: Dior Seongsu"
           />
         </div>
 
