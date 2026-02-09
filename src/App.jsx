@@ -1274,24 +1274,26 @@ function App() {
   }
 
   // Feed View
+  // Feed 뷰 언마운트 시 스크롤 위치 저장 방지 (Hook은 조건문 밖에서 호출)
+  useEffect(() => {
+    if (currentView !== 'feed') return
+    
+    return () => {
+      // Feed 뷰가 언마운트될 때 스크롤 위치를 초기화하여
+      // 다음 뷰(PostDetailView)로 전환 시 스크롤 위치가 유지되지 않도록 함
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0
+      }
+      if (document.body) {
+        document.body.scrollTop = 0
+      }
+    }
+  }, [currentView])
+
   if (currentView === 'feed') {
     const filteredPosts = getFilteredPosts()
     const filteredSpot = spotFilter ? hotSpots.find((s) => s.id === spotFilter) : null
-
-    // Feed 뷰 언마운트 시 스크롤 위치 저장 방지
-    useEffect(() => {
-      return () => {
-        // Feed 뷰가 언마운트될 때 스크롤 위치를 초기화하여
-        // 다음 뷰(PostDetailView)로 전환 시 스크롤 위치가 유지되지 않도록 함
-        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-        if (document.documentElement) {
-          document.documentElement.scrollTop = 0
-        }
-        if (document.body) {
-          document.body.scrollTop = 0
-        }
-      }
-    }, [])
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
@@ -2186,23 +2188,8 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const [isSwiping, setIsSwiping] = useState(false)
   const [userProfile, setUserProfile] = useState(null)
   
-  // Post 데이터 검증
-  if (!post) {
-    console.error('PostDetailView: post is null or undefined')
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-400 mb-4">Post not found</p>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    )
-  }
+  // Post 데이터 검증 (Hook 호출 후에 검증)
+  // Hook은 항상 같은 순서로 호출되어야 하므로, 조건부 return은 Hook 호출 후에 해야 함
   
   const allImages = post.images || (post.image ? [post.image] : [])
   const vibeInfo = getVibeInfo(post.vibe || 'quiet')
