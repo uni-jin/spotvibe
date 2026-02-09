@@ -148,16 +148,26 @@ export const changeAdminPassword = async (token, currentPassword, newPassword) =
 /**
  * Get common codes
  * @param {string} codeType - Code type (optional, if not provided returns all)
+ * @param {boolean} includeInactive - Include inactive codes (default: false)
  * @returns {Promise<Array>}
  */
-export const getCommonCodes = async (codeType = null) => {
+export const getCommonCodes = async (codeType = null, includeInactive = false) => {
   try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      // Public access: only active codes
+      includeInactive = false
+    }
+
     let query = supabase
       .from('common_codes')
       .select('*')
-      .eq('is_active', true)
       .order('code_type')
       .order('display_order')
+
+    if (!includeInactive) {
+      query = query.eq('is_active', true)
+    }
 
     if (codeType) {
       query = query.eq('code_type', codeType)
@@ -174,6 +184,107 @@ export const getCommonCodes = async (codeType = null) => {
   } catch (error) {
     console.error('Error fetching common codes:', error)
     return []
+  }
+}
+
+/**
+ * Create or update a common code
+ * @param {Object} codeData - Common code data
+ * @param {number|null} codeId - Code ID (null for create, number for update)
+ * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
+ */
+export const saveCommonCode = async (codeData, codeId = null) => {
+  try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const { valid } = await verifyAdminToken(token)
+    if (!valid) {
+      return { success: false, error: 'Invalid session' }
+    }
+
+    const codePayload = {
+      code_type: codeData.code_type,
+      code_value: codeData.code_value,
+      code_label_ko: codeData.code_label_ko,
+      code_label_en: codeData.code_label_en || null,
+      display_order: codeData.display_order || 0,
+      is_active: codeData.is_active !== undefined ? codeData.is_active : true,
+      updated_at: new Date().toISOString()
+    }
+
+    let result
+    if (codeId) {
+      // Update existing code
+      const { data, error } = await supabase
+        .from('common_codes')
+        .update(codePayload)
+        .eq('id', codeId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating common code:', error)
+        return { success: false, error: error.message }
+      }
+
+      result = data
+    } else {
+      // Create new code
+      const { data, error } = await supabase
+        .from('common_codes')
+        .insert(codePayload)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error creating common code:', error)
+        return { success: false, error: error.message }
+      }
+
+      result = data
+    }
+
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('Error saving common code:', error)
+    return { success: false, error: error.message || 'Failed to save common code' }
+  }
+}
+
+/**
+ * Delete a common code
+ * @param {number} codeId - Code ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const deleteCommonCode = async (codeId) => {
+  try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const { valid } = await verifyAdminToken(token)
+    if (!valid) {
+      return { success: false, error: 'Invalid session' }
+    }
+
+    const { error } = await supabase
+      .from('common_codes')
+      .delete()
+      .eq('id', codeId)
+
+    if (error) {
+      console.error('Error deleting common code:', error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error('Error deleting common code:', error)
+    return { success: false, error: error.message || 'Failed to delete common code' }
   }
 }
 
