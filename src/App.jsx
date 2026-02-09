@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css'
 import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
 import Masonry from 'react-masonry-css'
-import { auth, db } from './lib/supabase'
+import { auth, db, supabase } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 import { getCommonCodes, getCustomPlaceNames } from './lib/admin'
 
@@ -529,10 +529,28 @@ function App() {
       return
     }
     
-    // 스크롤을 최상단으로 강제 이동 (뷰 전환 전)
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-    document.documentElement.scrollTop = 0
-    document.body.scrollTop = 0
+    // 스크롤을 최상단으로 강제 이동 (뷰 전환 전 - 모든 방법 시도)
+    const forceScrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0
+        document.documentElement.scrollIntoView({ behavior: 'instant', block: 'start' })
+      }
+      if (document.body) {
+        document.body.scrollTop = 0
+      }
+      // 모든 스크롤 가능한 요소 초기화
+      const scrollableElements = document.querySelectorAll('[style*="overflow"], [class*="overflow"]')
+      scrollableElements.forEach(el => {
+        if (el.scrollTop > 0) {
+          el.scrollTop = 0
+        }
+      })
+    }
+    
+    // 즉시 실행 (여러 번)
+    forceScrollToTop()
+    forceScrollToTop()
     
     // 원본 포스트 데이터 확인 (vibePosts에서 찾기)
     const originalPost = vibePosts.find(p => p.id === post.id) || post
@@ -542,12 +560,24 @@ function App() {
     setSelectedPost(originalPost)
     setCurrentView('post-detail')
     
-    // 뷰 전환 후에도 스크롤 위치 보장
+    // 뷰 전환 후에도 스크롤 위치 보장 (여러 타이밍에 걸쳐)
+    requestAnimationFrame(() => {
+      forceScrollToTop()
+      setTimeout(() => {
+        forceScrollToTop()
+        setTimeout(() => {
+          forceScrollToTop()
+        }, 10)
+      }, 0)
+    })
+    
+    // 추가 보장을 위해 더 긴 지연 후에도 실행
     setTimeout(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-      document.documentElement.scrollTop = 0
-      document.body.scrollTop = 0
-    }, 0)
+      forceScrollToTop()
+    }, 50)
+    setTimeout(() => {
+      forceScrollToTop()
+    }, 100)
   }
   
   const handleClosePostDetail = () => {
@@ -1011,7 +1041,48 @@ function App() {
 
       const savedPost = await db.createPost(postData)
 
-      // 4. 로컬 state 업데이트 (새로 저장된 포스트 추가)
+      // 4. "기타" 카테고리 선택 시 custom_place_names 테이블에 저장/업데이트
+      if (postCategory === 'other' && postCustomPlace && postCustomPlace.trim()) {
+        try {
+          const placeName = postCustomPlace.trim()
+          
+          // 기존 레코드 확인
+          const { data: existing } = await supabase
+            .from('custom_place_names')
+            .select('*')
+            .eq('place_name', placeName)
+            .eq('category_type', 'other')
+            .single()
+          
+          if (existing) {
+            // 이미 존재하면 usage_count 증가 및 last_used_at 업데이트
+            await supabase
+              .from('custom_place_names')
+              .update({
+                usage_count: existing.usage_count + 1,
+                last_used_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', existing.id)
+          } else {
+            // 없으면 새로 insert
+            await supabase
+              .from('custom_place_names')
+              .insert({
+                place_name: placeName,
+                category_type: 'other',
+                usage_count: 1,
+                first_used_at: new Date().toISOString(),
+                last_used_at: new Date().toISOString(),
+              })
+          }
+        } catch (error) {
+          // custom_place_names 저장 실패는 로그만 남기고 포스팅은 계속 진행
+          console.error('Error saving custom place name:', error)
+        }
+      }
+
+      // 5. 로컬 state 업데이트 (새로 저장된 포스트 추가)
       const newPost = {
         id: savedPost.id,
         placeId: savedPost.place_id,
@@ -2120,18 +2191,27 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       // 방법 2: documentElement와 body 직접 설정
       if (document.documentElement) {
         document.documentElement.scrollTop = 0
+        document.documentElement.scrollIntoView({ behavior: 'instant', block: 'start' })
       }
       if (document.body) {
         document.body.scrollTop = 0
       }
       
-      // 방법 3: 헤더 요소로 스크롤
+      // 방법 3: 모든 스크롤 가능한 요소 초기화
+      const scrollableElements = document.querySelectorAll('[style*="overflow"], [class*="overflow"]')
+      scrollableElements.forEach(el => {
+        if (el.scrollTop > 0) {
+          el.scrollTop = 0
+        }
+      })
+      
+      // 방법 4: 헤더 요소로 스크롤
       const headerElement = document.getElementById('post-detail-header')
       if (headerElement) {
         headerElement.scrollIntoView({ behavior: 'instant', block: 'start' })
       }
       
-      // 방법 4: 최상위 요소로 스크롤
+      // 방법 5: 최상위 요소로 스크롤
       const viewElement = document.getElementById('post-detail-view')
       if (viewElement) {
         viewElement.scrollIntoView({ behavior: 'instant', block: 'start' })
@@ -2140,18 +2220,25 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
     
     // 즉시 실행 (여러 번)
     forceScrollToTop()
-    forceScrollToTop() // 한 번 더
+    forceScrollToTop()
+    forceScrollToTop()
     
     // DOM이 완전히 렌더링된 후 스크롤 이동
     requestAnimationFrame(() => {
       forceScrollToTop()
-      // 추가 보장을 위해 여러 번 실행
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         forceScrollToTop()
+        // 추가 보장을 위해 여러 번 실행
         setTimeout(() => {
           forceScrollToTop()
-        }, 10)
-      }, 0)
+          setTimeout(() => {
+            forceScrollToTop()
+            setTimeout(() => {
+              forceScrollToTop()
+            }, 10)
+          }, 10)
+        }, 0)
+      })
     })
     
     // 이미지 로드 후에도 스크롤 위치 재조정
@@ -2183,19 +2270,19 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       })
     }
     
-    // 추가 안전장치: 주기적으로 스크롤 위치 확인 및 조정
+    // 추가 안전장치: 주기적으로 스크롤 위치 확인 및 조정 (더 오래 실행)
     const scrollCheckInterval = setInterval(() => {
       const scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
-      if (scrollTop > 50) {
+      if (scrollTop > 10) {
         forceScrollToTop()
       }
-    }, 100)
+    }, 50)
     
-    // 1초 후 인터벌 제거
+    // 2초 후 인터벌 제거 (더 오래 실행)
     setTimeout(() => {
       clearInterval(scrollCheckInterval)
-    }, 1000)
-  }, [])
+    }, 2000)
+  }, [post]) // post가 변경될 때마다 실행
 
   // 사용자 프로필 정보 로드
   useEffect(() => {
