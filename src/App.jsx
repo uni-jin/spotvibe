@@ -1311,15 +1311,20 @@ function App() {
   }, [currentView])
 
   if (currentView === 'feed') {
-    // selectedRegion이 없으면 home 뷰를 렌더링 (조건부 return 제거하여 Hook 순서 보장)
+    // selectedRegion이 없으면 로딩 화면 표시 (조건부 return 완전 제거)
+    // useEffect에서 home으로 리다이렉트 처리 중
     if (!selectedRegion) {
-      // home 뷰로 리다이렉트되도록 하기 위해 home 뷰를 렌더링
-      // (useEffect에서 이미 처리하지만, 즉시 반영을 위해)
+      const filteredPosts = []
+      const filteredSpot = null
+      
       return (
-        <div className="min-h-screen bg-black text-white flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-400">Redirecting...</p>
+        <div className="min-h-screen bg-black text-white pb-24">
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <p className="text-gray-400">Redirecting...</p>
+            </div>
           </div>
+          <BottomNav currentView={currentView} onNavClick={handleNavClick} />
         </div>
       )
     }
