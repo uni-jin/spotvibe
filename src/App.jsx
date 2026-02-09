@@ -1210,8 +1210,6 @@ function App() {
   if (currentView === 'home') {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-4 py-12 pb-24">
-        {/* Bottom Navigation */}
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
         {/* Header */}
         <div className="text-center mb-16 space-y-4">
           <h1 className="text-6xl md:text-7xl font-bold tracking-tight">
