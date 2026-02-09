@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
 import imageCompression from 'browser-image-compression'
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 const PlacesManagement = () => {
   const [places, setPlaces] = useState([])
@@ -299,9 +302,53 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  
+  // Map state
+  const [markerPosition, setMarkerPosition] = useState(
+    place?.lat && place?.lng ? [parseFloat(place.lat), parseFloat(place.lng)] : null
+  )
+  const [mapCenter, setMapCenter] = useState(
+    place?.lat && place?.lng 
+      ? [parseFloat(place.lat), parseFloat(place.lng)]
+      : [37.5446, 127.0559] // 기본값: 성수동
+  )
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    
+    // 위도/경도가 직접 입력되면 마커 위치도 업데이트
+    if (field === 'lat' || field === 'lng') {
+      const lat = field === 'lat' ? parseFloat(value) : parseFloat(formData.lat)
+      const lng = field === 'lng' ? parseFloat(value) : parseFloat(formData.lng)
+      
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+        setMarkerPosition([lat, lng])
+        setMapCenter([lat, lng])
+      }
+    }
+  }
+
+  // Leaflet 기본 아이콘 설정
+  useEffect(() => {
+    delete (L.Icon.Default.prototype as any)._getIconUrl
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+    })
+  }, [])
+
+  // Map click handler component
+  const MapClickHandler = () => {
+    useMapEvents({
+      click: (e) => {
+        const { lat, lng } = e.latlng
+        setMarkerPosition([lat, lng])
+        handleInputChange('lat', lat.toString())
+        handleInputChange('lng', lng.toString())
+      },
+    })
+    return null
   }
 
   const handleFileSelect = async (e) => {
@@ -482,32 +529,75 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         </div>
 
         {/* Location */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              위도 (Latitude) <span className="text-gray-500 text-xs">(선택)</span>
-            </label>
-            <input
-              type="number"
-              step="any"
-              value={formData.lat}
-              onChange={(e) => handleInputChange('lat', e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-              placeholder="37.5432"
-            />
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            위치 설정 <span className="text-gray-500 text-xs">(선택)</span>
+          </label>
+          <p className="text-xs text-gray-400 mb-2">
+            지도를 클릭하여 위치를 선택하거나, 아래 입력란에 직접 좌표를 입력할 수 있습니다.
+          </p>
+          
+          {/* Map */}
+          <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '400px' }}>
+            <MapContainer
+              center={mapCenter}
+              zoom={markerPosition ? 16 : 13}
+              style={{ height: '100%', width: '100%' }}
+              className="dark-map"
+              scrollWheelZoom={true}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                className="dark-tiles"
+              />
+              <MapClickHandler />
+              {markerPosition && (
+                <Marker
+                  position={markerPosition}
+                  draggable={true}
+                  eventHandlers={{
+                    dragend: (e) => {
+                      const marker = e.target
+                      const position = marker.getLatLng()
+                      setMarkerPosition([position.lat, position.lng])
+                      handleInputChange('lat', position.lat.toString())
+                      handleInputChange('lng', position.lng.toString())
+                    },
+                  }}
+                />
+              )}
+            </MapContainer>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              경도 (Longitude) <span className="text-gray-500 text-xs">(선택)</span>
-            </label>
-            <input
-              type="number"
-              step="any"
-              value={formData.lng}
-              onChange={(e) => handleInputChange('lng', e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-              placeholder="127.0543"
-            />
+
+          {/* Coordinate inputs */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                위도 (Latitude)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={formData.lat}
+                onChange={(e) => handleInputChange('lat', e.target.value)}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                placeholder="37.5432"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                경도 (Longitude)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={formData.lng}
+                onChange={(e) => handleInputChange('lng', e.target.value)}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                placeholder="127.0543"
+              />
+            </div>
           </div>
         </div>
 
