@@ -807,6 +807,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
                   className="dark-tiles"
                 />
                 <MapClickHandler />
+                <MapCenterSync />
                 {markerPosition && (
                   <Marker
                     position={markerPosition}
