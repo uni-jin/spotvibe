@@ -400,6 +400,89 @@ export const getCustomPlaceNames = async () => {
 }
 
 /**
+ * Promote custom place name to official place
+ * @param {number} customPlaceId - Custom place name ID
+ * @param {Object} placeData - Additional place data (name, type, lat, lng, description, thumbnail_url)
+ * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
+ */
+export const promoteCustomPlace = async (customPlaceId, placeData) => {
+  try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const { valid } = await verifyAdminToken(token)
+    if (!valid) {
+      return { success: false, error: 'Invalid session' }
+    }
+
+    // Get custom place name
+    const { data: customPlace, error: customPlaceError } = await supabase
+      .from('custom_place_names')
+      .select('*')
+      .eq('id', customPlaceId)
+      .single()
+
+    if (customPlaceError || !customPlace) {
+      return { success: false, error: 'Custom place not found' }
+    }
+
+    // Create official place
+    const placePayload = {
+      name: placeData.name || customPlace.place_name,
+      name_en: placeData.name_en || null,
+      type: placeData.type || customPlace.category_type || 'other',
+      thumbnail_url: placeData.thumbnail_url || null,
+      description: placeData.description || null,
+      lat: placeData.lat ? parseFloat(placeData.lat) : null,
+      lng: placeData.lng ? parseFloat(placeData.lng) : null,
+      is_active: true,
+    }
+
+    const { data: newPlace, error: placeError } = await supabase
+      .from('places')
+      .insert(placePayload)
+      .select()
+      .single()
+
+    if (placeError) {
+      console.error('Error creating place:', placeError)
+      return { success: false, error: placeError.message }
+    }
+
+    // Update posts that use this custom place name to reference the new official place
+    const { error: updatePostsError } = await supabase
+      .from('posts')
+      .update({ place_id: newPlace.id })
+      .eq('place_name', customPlace.place_name)
+      .is('place_id', null)
+
+    if (updatePostsError) {
+      console.warn('Warning: Failed to update posts:', updatePostsError)
+      // Continue even if post update fails
+    }
+
+    // Delete custom place name (or mark as promoted)
+    const { error: deleteError } = await supabase
+      .from('custom_place_names')
+      .delete()
+      .eq('id', customPlaceId)
+
+    if (deleteError) {
+      console.error('Error deleting custom place name:', deleteError)
+      // Place was created, but custom place name deletion failed
+      // This is not critical, but should be logged
+    }
+
+    return { success: true, data: newPlace }
+  } catch (error) {
+    console.error('Error promoting custom place:', error)
+    return { success: false, error: error.message || 'Failed to promote custom place' }
+  }
+}
+
+/**
  * Create or update a place
  * @param {Object} placeData - Place data
  * @param {number|null} placeId - Place ID (null for create, number for update)
