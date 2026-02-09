@@ -8,7 +8,7 @@ import imageCompression from 'browser-image-compression'
 import Masonry from 'react-masonry-css'
 import { auth, db } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
-import { getCommonCodes } from './lib/admin'
+import { getCommonCodes, getCustomPlaceNames } from './lib/admin'
 
 function App() {
   const location = useLocation()
@@ -46,6 +46,7 @@ function App() {
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
   const [categories, setCategories] = useState([]) // 카테고리 목록
   const [selectedHotSpotCategory, setSelectedHotSpotCategory] = useState('popup_store') // Hot Spots Now에서 선택된 카테고리
+  const [customPlaceNames, setCustomPlaceNames] = useState([]) // 사용자 입력 "기타" 장소명 목록
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
@@ -436,6 +437,19 @@ function App() {
       }
     }
     loadCategories()
+  }, [])
+
+  // 사용자 입력 "기타" 장소명 목록 로드
+  useEffect(() => {
+    const loadCustomPlaceNames = async () => {
+      try {
+        const names = await getCustomPlaceNames()
+        setCustomPlaceNames(names)
+      } catch (error) {
+        console.error('Error loading custom place names:', error)
+      }
+    }
+    loadCustomPlaceNames()
   }, [])
 
   // Post Vibe 모달에서 사용할 장소 목록 (카테고리별로 필터링)
@@ -1510,6 +1524,7 @@ function App() {
           <PostVibeModal
             categories={categories}
             places={filteredPlaces}
+            customPlaceNames={customPlaceNames}
             selectedCategory={postCategory}
             selectedPlace={postPlace}
             selectedCustomPlace={postCustomPlace}
@@ -2476,6 +2491,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
 function PostVibeModal({
   categories,
   places,
+  customPlaceNames = [],
   selectedCategory,
   selectedPlace,
   selectedCustomPlace,
@@ -2503,6 +2519,9 @@ function PostVibeModal({
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
+  const [customPlaceSuggestions, setCustomPlaceSuggestions] = useState([])
+  const [showCustomSuggestions, setShowCustomSuggestions] = useState(false)
+  const customPlaceInputRef = useRef(null)
 
   const handlePlaceSelect = (placeName) => {
     onPlaceChange(placeName)
@@ -2516,16 +2535,19 @@ function PostVibeModal({
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDropdownOpen(false)
       }
+      if (customPlaceInputRef.current && !customPlaceInputRef.current.contains(event.target)) {
+        setShowCustomSuggestions(false)
+      }
     }
 
-    if (isDropdownOpen) {
+    if (isDropdownOpen || showCustomSuggestions) {
       document.addEventListener('mousedown', handleClickOutside)
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isDropdownOpen])
+  }, [isDropdownOpen, showCustomSuggestions])
 
   return (
     <>
@@ -2658,18 +2680,66 @@ function PostVibeModal({
 
           {/* Custom Place Input (for "other" category) */}
           {selectedCategory === 'other' && (
-            <div className="space-y-2">
+            <div className="space-y-2 relative" ref={customPlaceInputRef}>
               <label className="text-sm font-semibold text-gray-400">
                 Place Name
               </label>
               <input
                 type="text"
                 value={selectedCustomPlace}
-                onChange={(e) => onCustomPlaceChange(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  onCustomPlaceChange(value)
+                  
+                  // Autocomplete suggestions 필터링
+                  if (value.trim().length > 0) {
+                    const filtered = customPlaceNames
+                      .filter(item => 
+                        item.place_name.toLowerCase().includes(value.toLowerCase()) &&
+                        (!item.category_type || item.category_type === 'other')
+                      )
+                      .slice(0, 5) // 최대 5개만 표시
+                    setCustomPlaceSuggestions(filtered)
+                    setShowCustomSuggestions(filtered.length > 0)
+                  } else {
+                    setCustomPlaceSuggestions([])
+                    setShowCustomSuggestions(false)
+                  }
+                }}
+                onFocus={() => {
+                  if (selectedCustomPlace.trim().length > 0 && customPlaceSuggestions.length > 0) {
+                    setShowCustomSuggestions(true)
+                  }
+                }}
                 placeholder="Enter place name..."
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#ADFF2F] transition-colors"
                 maxLength={100}
               />
+              
+              {/* Autocomplete Suggestions */}
+              {showCustomSuggestions && customPlaceSuggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                  {customPlaceSuggestions.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        onCustomPlaceChange(item.place_name)
+                        setShowCustomSuggestions(false)
+                        setCustomPlaceSuggestions([])
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm transition-colors flex items-center justify-between text-white hover:bg-gray-700"
+                    >
+                      <span>{item.place_name}</span>
+                      {item.usage_count > 1 && (
+                        <span className="text-xs text-gray-400 ml-2">
+                          ({item.usage_count} times)
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
