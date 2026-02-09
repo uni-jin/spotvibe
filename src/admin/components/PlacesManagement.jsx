@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import { getAdminPlaces, getCommonCodes } from '../../lib/admin'
+import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
+import { db } from '../../lib/supabase'
+import imageCompression from 'browser-image-compression'
 
 const PlacesManagement = () => {
   const [places, setPlaces] = useState([])
@@ -281,22 +283,292 @@ const PlacesManagement = () => {
   )
 }
 
-// PlaceForm component will be implemented separately
+// PlaceForm component
 const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
+  const [formData, setFormData] = useState({
+    name: place?.name || '',
+    name_en: place?.name_en || '',
+    type: place?.type || '',
+    description: place?.description || '',
+    lat: place?.lat || '',
+    lng: place?.lng || '',
+    is_active: place?.is_active !== undefined ? place.is_active : true,
+  })
+  const [thumbnailFile, setThumbnailFile] = useState(null)
+  const [thumbnailPreview, setThumbnailPreview] = useState(place?.thumbnail_url || null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setError('이미지 파일만 업로드 가능합니다.')
+      return
+    }
+
+    // Create preview
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setThumbnailPreview(reader.result)
+    }
+    reader.readAsDataURL(file)
+
+    setThumbnailFile(file)
+    setError('')
+  }
+
+  const compressImage = async (file) => {
+    const options = {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1200,
+      useWebWorker: true,
+      fileType: 'image/jpeg',
+      initialQuality: 0.85,
+    }
+
+    try {
+      return await imageCompression(file, options)
+    } catch (error) {
+      console.error('Error compressing image:', error)
+      return file
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+
+    // Validation
+    if (!formData.name.trim()) {
+      setError('장소명(한글)을 입력해주세요.')
+      return
+    }
+
+    if (!formData.type) {
+      setError('카테고리를 선택해주세요.')
+      return
+    }
+
+    setIsUploading(true)
+
+    try {
+      let thumbnailUrl = place?.thumbnail_url || null
+
+      // Upload thumbnail if new file selected
+      if (thumbnailFile) {
+        const compressedFile = await compressImage(thumbnailFile)
+        const timestamp = Date.now()
+        const fileExtension = compressedFile.name.split('.').pop() || 'jpg'
+        const thumbnailPath = `places/${timestamp}_${formData.name.replace(/\s+/g, '_')}.${fileExtension}`
+
+        const { data: uploadData, error: uploadError } = await db.uploadImage(compressedFile, thumbnailPath)
+
+        if (uploadError) {
+          throw new Error('대표사진 업로드에 실패했습니다.')
+        }
+
+        thumbnailUrl = uploadData.publicUrl
+      }
+
+      // Save place
+      const result = await savePlace(
+        {
+          ...formData,
+          thumbnail_url: thumbnailUrl,
+        },
+        place?.id || null
+      )
+
+      if (!result.success) {
+        throw new Error(result.error || '장소 저장에 실패했습니다.')
+      }
+
+      setSuccess(place ? '장소가 수정되었습니다.' : '장소가 등록되었습니다.')
+      setTimeout(() => {
+        onSuccess()
+      }, 1000)
+    } catch (err) {
+      console.error('Error saving place:', err)
+      setError(err.message || '장소 저장에 실패했습니다.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   return (
     <div className="bg-gray-900 rounded-lg p-6">
-      <h3 className="text-xl font-bold mb-4">
+      <h3 className="text-xl font-bold mb-6">
         {place ? '장소 수정' : '장소 등록'}
       </h3>
-      <p className="text-gray-400 mb-4">장소 등록 폼은 다음 단계에서 구현됩니다.</p>
-      <div className="flex gap-2">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg"
-        >
-          취소
-        </button>
-      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Category */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            카테고리 <span className="text-red-400">*</span>
+          </label>
+          <select
+            value={formData.type}
+            onChange={(e) => handleInputChange('type', e.target.value)}
+            required
+            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+          >
+            <option value="">카테고리 선택</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.code_value}>
+                {cat.code_label_ko}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Name (Korean) */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            장소명 (한글) <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={formData.name}
+            onChange={(e) => handleInputChange('name', e.target.value)}
+            required
+            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+            placeholder="예: 디올 성수"
+          />
+        </div>
+
+        {/* Name (English) */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            장소명 (영문) <span className="text-gray-500 text-xs">(선택)</span>
+          </label>
+          <input
+            type="text"
+            value={formData.name_en}
+            onChange={(e) => handleInputChange('name_en', e.target.value)}
+            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+            placeholder="예: Dior Seongsu"
+          />
+        </div>
+
+        {/* Thumbnail */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            대표사진 <span className="text-gray-500 text-xs">(선택)</span>
+          </label>
+          {thumbnailPreview && (
+            <div className="mb-4">
+              <img
+                src={thumbnailPreview}
+                alt="Thumbnail preview"
+                className="w-32 h-32 object-cover rounded-lg border border-gray-700"
+              />
+            </div>
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-[#ADFF2F] file:text-black hover:file:bg-[#ADFF2F]/90"
+          />
+        </div>
+
+        {/* Location */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              위도 (Latitude) <span className="text-gray-500 text-xs">(선택)</span>
+            </label>
+            <input
+              type="number"
+              step="any"
+              value={formData.lat}
+              onChange={(e) => handleInputChange('lat', e.target.value)}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="37.5432"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              경도 (Longitude) <span className="text-gray-500 text-xs">(선택)</span>
+            </label>
+            <input
+              type="number"
+              step="any"
+              value={formData.lng}
+              onChange={(e) => handleInputChange('lng', e.target.value)}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="127.0543"
+            />
+          </div>
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            설명 <span className="text-gray-500 text-xs">(선택)</span>
+          </label>
+          <textarea
+            value={formData.description}
+            onChange={(e) => handleInputChange('description', e.target.value)}
+            rows={4}
+            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
+            placeholder="장소에 대한 설명을 입력하세요..."
+          />
+        </div>
+
+        {/* Active Status */}
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.is_active}
+              onChange={(e) => handleInputChange('is_active', e.target.checked)}
+              className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+            />
+            <span className="text-sm text-gray-300">활성화</span>
+          </label>
+        </div>
+
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="p-3 bg-green-500/20 border border-green-500 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white transition-colors"
+            disabled={isUploading}
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            className="flex-1 px-4 py-2 bg-[#ADFF2F] hover:bg-[#ADFF2F]/90 text-black font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isUploading}
+          >
+            {isUploading ? '저장 중...' : place ? '수정' : '등록'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

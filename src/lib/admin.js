@@ -287,3 +287,106 @@ export const getCustomPlaceNames = async () => {
     return []
   }
 }
+
+/**
+ * Create or update a place
+ * @param {Object} placeData - Place data
+ * @param {number|null} placeId - Place ID (null for create, number for update)
+ * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
+ */
+export const savePlace = async (placeData, placeId = null) => {
+  try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const { valid } = await verifyAdminToken(token)
+    if (!valid) {
+      return { success: false, error: 'Invalid session' }
+    }
+
+    const placePayload = {
+      name: placeData.name,
+      name_en: placeData.name_en || null,
+      type: placeData.type,
+      thumbnail_url: placeData.thumbnail_url || null,
+      description: placeData.description || null,
+      lat: placeData.lat ? parseFloat(placeData.lat) : null,
+      lng: placeData.lng ? parseFloat(placeData.lng) : null,
+      is_active: placeData.is_active !== undefined ? placeData.is_active : true,
+      updated_at: new Date().toISOString()
+    }
+
+    let result
+    if (placeId) {
+      // Update existing place
+      const { data, error } = await supabase
+        .from('places')
+        .update(placePayload)
+        .eq('id', placeId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating place:', error)
+        return { success: false, error: error.message }
+      }
+
+      result = data
+    } else {
+      // Create new place
+      const { data, error } = await supabase
+        .from('places')
+        .insert(placePayload)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error creating place:', error)
+        return { success: false, error: error.message }
+      }
+
+      result = data
+    }
+
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('Error saving place:', error)
+    return { success: false, error: error.message || 'Failed to save place' }
+  }
+}
+
+/**
+ * Delete a place
+ * @param {number} placeId - Place ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const deletePlace = async (placeId) => {
+  try {
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const { valid } = await verifyAdminToken(token)
+    if (!valid) {
+      return { success: false, error: 'Invalid session' }
+    }
+
+    const { error } = await supabase
+      .from('places')
+      .delete()
+      .eq('id', placeId)
+
+    if (error) {
+      console.error('Error deleting place:', error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error('Error deleting place:', error)
+    return { success: false, error: error.message || 'Failed to delete place' }
+  }
+}
