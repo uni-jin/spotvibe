@@ -208,8 +208,7 @@ export const saveCommonCode = async (codeData, codeId = null) => {
     const codePayload = {
       code_type: codeData.code_type,
       code_value: codeData.code_value,
-      code_label_ko: codeData.code_label_ko,
-      code_label_en: codeData.code_label_en || null,
+      code_label: codeData.code_label,
       display_order: codeData.display_order || 0,
       is_active: codeData.is_active !== undefined ? codeData.is_active : true,
       updated_at: new Date().toISOString()
@@ -428,6 +427,22 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
       return { success: false, error: 'Custom place not found' }
     }
 
+    // Convert Korean time to UTC for database
+    let displayStartDate = null
+    let displayEndDate = null
+    
+    if (placeData.display_start_date) {
+      const kstDate = new Date(placeData.display_start_date)
+      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+      displayStartDate = utcDate.toISOString()
+    }
+    
+    if (placeData.display_end_date) {
+      const kstDate = new Date(placeData.display_end_date)
+      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+      displayEndDate = utcDate.toISOString()
+    }
+
     // Create official place using admin function
     const { data: newPlaceData, error: placeError } = await supabase.rpc('admin_save_place', {
       p_name: placeData.name || customPlace.place_name,
@@ -439,7 +454,9 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
       p_lat: placeData.lat ? parseFloat(placeData.lat) : null,
       p_lng: placeData.lng ? parseFloat(placeData.lng) : null,
       p_is_active: true,
-      p_region_id: null
+      p_region_id: null,
+      p_display_start_date: displayStartDate,
+      p_display_end_date: displayEndDate
     })
 
     const newPlace = Array.isArray(newPlaceData) && newPlaceData.length > 0 ? newPlaceData[0] : newPlaceData
@@ -498,6 +515,25 @@ export const savePlace = async (placeData, placeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
+    // Convert KST datetime to UTC for database
+    // datetime-local input provides date in local timezone, but we treat it as KST
+    let displayStartDate = null
+    let displayEndDate = null
+    
+    if (placeData.display_start_date) {
+      // Parse KST datetime string and convert to UTC
+      const kstDate = new Date(placeData.display_start_date)
+      // Subtract 9 hours to convert KST to UTC
+      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+      displayStartDate = utcDate.toISOString()
+    }
+    
+    if (placeData.display_end_date) {
+      const kstDate = new Date(placeData.display_end_date)
+      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+      displayEndDate = utcDate.toISOString()
+    }
+
     // Use SECURITY DEFINER function to bypass RLS
     const { data, error } = await supabase.rpc('admin_save_place', {
       p_name: placeData.name,
@@ -509,7 +545,9 @@ export const savePlace = async (placeData, placeId = null) => {
       p_lat: placeData.lat ? parseFloat(placeData.lat) : null,
       p_lng: placeData.lng ? parseFloat(placeData.lng) : null,
       p_is_active: placeData.is_active !== undefined ? placeData.is_active : true,
-      p_region_id: placeData.region_id || null
+      p_region_id: placeData.region_id || null,
+      p_display_start_date: displayStartDate,
+      p_display_end_date: displayEndDate
     })
 
     if (error) {

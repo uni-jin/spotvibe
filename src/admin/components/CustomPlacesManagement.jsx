@@ -272,7 +272,7 @@ const PromotePlaceForm = ({ customPlace, categories, onClose, onSuccess }) => {
               <option value="">카테고리 선택</option>
               {categories.map((cat) => (
                 <option key={cat.id} value={cat.code_value}>
-                  {cat.code_label_ko}
+                  {cat.code_label}
                 </option>
               ))}
             </select>

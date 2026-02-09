@@ -18,6 +18,7 @@ const PlacesManagement = () => {
   const [searchName, setSearchName] = useState('')
   const [searchCategory, setSearchCategory] = useState('')
   const [searchActive, setSearchActive] = useState('')
+  const [searchDisplayStatus, setSearchDisplayStatus] = useState('')
 
   useEffect(() => {
     loadData()
@@ -25,7 +26,7 @@ const PlacesManagement = () => {
 
   useEffect(() => {
     filterPlaces()
-  }, [places, searchName, searchCategory, searchActive])
+  }, [places, searchName, searchCategory, searchActive, searchDisplayStatus])
 
   const loadData = async () => {
     try {
@@ -81,13 +82,84 @@ const PlacesManagement = () => {
   const formatDate = (dateString) => {
     if (!dateString) return '-'
     const date = new Date(dateString)
-    return date.toLocaleDateString('ko-KR', {
+    // Convert to KST (UTC+9)
+    const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+    return kstDate.toLocaleDateString('ko-KR', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const formatDisplayPeriod = (place) => {
+    if (!place.display_start_date && !place.display_end_date) {
+      return <span className="text-xs text-gray-500">무제한</span>
+    }
+    
+    const now = new Date()
+    const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000))
+    const start = place.display_start_date ? new Date(place.display_start_date) : null
+    const end = place.display_end_date ? new Date(place.display_end_date) : null
+    
+    // Determine status
+    let status = 'unlimited'
+    let statusColor = 'text-gray-500'
+    if (start && end) {
+      if (start <= kstNow && end >= kstNow) {
+        status = 'active'
+        statusColor = 'text-green-400'
+      } else if (start > kstNow) {
+        status = 'scheduled'
+        statusColor = 'text-yellow-400'
+      } else {
+        status = 'expired'
+        statusColor = 'text-red-400'
+      }
+    } else if (start) {
+      if (start <= kstNow) {
+        status = 'active'
+        statusColor = 'text-green-400'
+      } else {
+        status = 'scheduled'
+        statusColor = 'text-yellow-400'
+      }
+    } else if (end) {
+      if (end >= kstNow) {
+        status = 'active'
+        statusColor = 'text-green-400'
+      } else {
+        status = 'expired'
+        statusColor = 'text-red-400'
+      }
+    }
+    
+    const formatDateOnly = (date) => {
+      const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+      return kstDate.toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      })
+    }
+    
+    const startStr = start ? formatDateOnly(start) : '시작일 없음'
+    const endStr = end ? formatDateOnly(end) : '종료일 없음'
+    
+    return (
+      <div className="space-y-1">
+        <div className={`text-xs ${statusColor} font-semibold`}>
+          {status === 'active' && '노출 중'}
+          {status === 'scheduled' && '노출 예정'}
+          {status === 'expired' && '노출 종료'}
+          {status === 'unlimited' && '무제한'}
+        </div>
+        <div className="text-xs text-gray-400">
+          {startStr} ~ {endStr}
+        </div>
+      </div>
+    )
   }
 
   const handleAddNew = () => {
@@ -104,6 +176,7 @@ const PlacesManagement = () => {
     setSearchName('')
     setSearchCategory('')
     setSearchActive('')
+    setSearchDisplayStatus('')
   }
 
   if (isLoading) {
@@ -166,7 +239,7 @@ const PlacesManagement = () => {
                   <option value="">전체</option>
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.code_value}>
-                      {cat.code_label_ko}
+                      {cat.code_label}
                     </option>
                   ))}
                 </select>
@@ -205,6 +278,7 @@ const PlacesManagement = () => {
                     <th className="px-6 py-3 text-left text-sm font-semibold">최근 상태</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold">포스팅 수</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold">활성화</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold">노출기간</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold">등록일</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold">작업</th>
                   </tr>
@@ -219,7 +293,7 @@ const PlacesManagement = () => {
                             <p className="font-medium">{place.name}</p>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-300">
-                            {category?.code_label_ko || place.type || '-'}
+                            {category?.code_label || place.type || '-'}
                           </td>
                           <td className="px-6 py-4">
                             {place.recentVibe ? (
@@ -249,6 +323,9 @@ const PlacesManagement = () => {
                               {place.is_active ? '활성' : '비활성'}
                             </span>
                           </td>
+                          <td className="px-6 py-4">
+                            {formatDisplayPeriod(place)}
+                          </td>
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {formatDate(place.created_at)}
                           </td>
@@ -265,7 +342,7 @@ const PlacesManagement = () => {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
+                      <td colSpan="8" className="px-6 py-8 text-center text-gray-400">
                         {places.length === 0 ? '등록된 장소가 없습니다.' : '검색 결과가 없습니다.'}
                       </td>
                     </tr>
@@ -282,6 +359,21 @@ const PlacesManagement = () => {
 
 // PlaceForm component
 const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
+  // Helper to convert UTC date to KST date string for input
+  const utcToKstDateString = (utcDateString) => {
+    if (!utcDateString) return ''
+    const date = new Date(utcDateString)
+    // Convert UTC to KST (UTC+9)
+    const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+    // Format as YYYY-MM-DDTHH:mm for datetime-local input
+    const year = kstDate.getFullYear()
+    const month = String(kstDate.getMonth() + 1).padStart(2, '0')
+    const day = String(kstDate.getDate()).padStart(2, '0')
+    const hours = String(kstDate.getHours()).padStart(2, '0')
+    const minutes = String(kstDate.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  }
+
   const [formData, setFormData] = useState({
     name: place?.name || '',
     type: place?.type || '',
@@ -289,6 +381,9 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
     lat: place?.lat || '',
     lng: place?.lng || '',
     is_active: place?.is_active !== undefined ? place.is_active : true,
+    display_start_date: place?.display_start_date ? utcToKstDateString(place.display_start_date) : '',
+    display_end_date: place?.display_end_date ? utcToKstDateString(place.display_end_date) : '',
+    unlimited_display: !place?.display_start_date && !place?.display_end_date,
   })
   const [thumbnailFile, setThumbnailFile] = useState(null)
   const [thumbnailPreview, setThumbnailPreview] = useState(place?.thumbnail_url || null)
@@ -422,12 +517,34 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         thumbnailUrl = uploadData.publicUrl
       }
 
+      // Convert KST datetime to UTC for database
+      let displayStartDate = null
+      let displayEndDate = null
+      
+      if (!formData.unlimited_display) {
+        if (formData.display_start_date) {
+          // Parse KST datetime string and convert to UTC
+          const kstDate = new Date(formData.display_start_date)
+          // Subtract 9 hours to convert KST to UTC
+          const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+          displayStartDate = utcDate.toISOString()
+        }
+        
+        if (formData.display_end_date) {
+          const kstDate = new Date(formData.display_end_date)
+          const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
+          displayEndDate = utcDate.toISOString()
+        }
+      }
+
       // Save place (name_en은 null로 설정)
       const result = await savePlace(
         {
           ...formData,
           name_en: null, // 영문명 필드 제거
           thumbnail_url: thumbnailUrl,
+          display_start_date: displayStartDate,
+          display_end_date: displayEndDate,
         },
         place?.id || null
       )
@@ -469,7 +586,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
             <option value="">카테고리 선택</option>
             {categories.map((cat) => (
               <option key={cat.id} value={cat.code_value}>
-                {cat.code_label_ko}
+                {cat.code_label}
               </option>
             ))}
           </select>
@@ -606,6 +723,53 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
             className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
             placeholder="장소에 대한 설명을 입력하세요..."
           />
+        </div>
+
+        {/* Display Period */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            노출기간 <span className="text-gray-500 text-xs">(선택)</span>
+          </label>
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.unlimited_display}
+                onChange={(e) => {
+                  handleInputChange('unlimited_display', e.target.checked)
+                  if (e.target.checked) {
+                    handleInputChange('display_start_date', '')
+                    handleInputChange('display_end_date', '')
+                  }
+                }}
+                className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+              />
+              <span className="text-sm text-gray-300">무제한 노출</span>
+            </label>
+            
+            {!formData.unlimited_display && (
+              <div className="grid grid-cols-2 gap-4 pl-6">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">시작일시 (KST)</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.display_start_date}
+                    onChange={(e) => handleInputChange('display_start_date', e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">종료일시 (KST)</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.display_end_date}
+                    onChange={(e) => handleInputChange('display_end_date', e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Active Status */}

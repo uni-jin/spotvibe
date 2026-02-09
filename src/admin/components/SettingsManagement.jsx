@@ -167,7 +167,7 @@ const CommonCodesManagement = ({ categories, onReload }) => {
   }
 
   const handleDelete = async (code) => {
-    if (window.confirm(`"${code.code_label_ko}" 카테고리를 삭제하시겠습니까?`)) {
+    if (window.confirm(`"${code.code_label}" 카테고리를 삭제하시겠습니까?`)) {
       const result = await deleteCommonCode(code.id)
       if (result.success) {
         onReload()
@@ -229,7 +229,7 @@ const CommonCodesManagement = ({ categories, onReload }) => {
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="font-medium">{category.code_label_ko}</p>
+                    <p className="font-medium">{category.code_label}</p>
                     {!category.is_active && (
                       <span className="px-2 py-0.5 bg-gray-700 text-gray-400 text-xs rounded">
                         비활성
@@ -237,9 +237,6 @@ const CommonCodesManagement = ({ categories, onReload }) => {
                     )}
                   </div>
                   <p className="text-sm text-gray-400">{category.code_value}</p>
-                  {category.code_label_en && (
-                    <p className="text-xs text-gray-500">{category.code_label_en}</p>
-                  )}
                   <p className="text-xs text-gray-500 mt-1">
                     순서: {category.display_order}
                   </p>
@@ -279,8 +276,7 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
     code_type: 'place_category',
     code_value: code?.code_value || '',
-    code_label_ko: code?.code_label_ko || '',
-    code_label_en: code?.code_label_en || '',
+    code_label: code?.code_label || '',
     display_order: code?.display_order || 0,
     is_active: code?.is_active !== undefined ? code.is_active : true,
   })
@@ -303,8 +299,8 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
       return
     }
 
-    if (!formData.code_label_ko.trim()) {
-      setError('한글명을 입력해주세요.')
+    if (!formData.code_label.trim()) {
+      setError('코드명을 입력해주세요.')
       return
     }
 
@@ -356,26 +352,13 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
 
         <div>
           <label className="block text-sm font-medium mb-2 text-gray-300">
-            한글명 <span className="text-red-400">*</span>
+            코드명 <span className="text-red-400">*</span>
           </label>
           <input
             type="text"
-            value={formData.code_label_ko}
-            onChange={(e) => handleInputChange('code_label_ko', e.target.value)}
+            value={formData.code_label}
+            onChange={(e) => handleInputChange('code_label', e.target.value)}
             required
-            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-            placeholder="예: 팝업스토어"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-2 text-gray-300">
-            영문명 <span className="text-gray-500 text-xs">(선택)</span>
-          </label>
-          <input
-            type="text"
-            value={formData.code_label_en}
-            onChange={(e) => handleInputChange('code_label_en', e.target.value)}
             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
             placeholder="예: Pop-up Store"
           />

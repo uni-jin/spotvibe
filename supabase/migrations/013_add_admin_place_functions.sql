@@ -12,7 +12,9 @@ CREATE OR REPLACE FUNCTION admin_save_place(
   p_lat DECIMAL(10, 8) DEFAULT NULL,
   p_lng DECIMAL(11, 8) DEFAULT NULL,
   p_is_active BOOLEAN DEFAULT true,
-  p_region_id TEXT DEFAULT NULL
+  p_region_id TEXT DEFAULT NULL,
+  p_display_start_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+  p_display_end_date TIMESTAMP WITH TIME ZONE DEFAULT NULL
 )
 RETURNS TABLE (
   id INTEGER,
@@ -25,6 +27,8 @@ RETURNS TABLE (
   lng DECIMAL(11, 8),
   is_active BOOLEAN,
   region_id TEXT,
+  display_start_date TIMESTAMP WITH TIME ZONE,
+  display_end_date TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE,
   updated_at TIMESTAMP WITH TIME ZONE
 )
