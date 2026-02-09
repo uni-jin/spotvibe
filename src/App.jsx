@@ -8,6 +8,7 @@ import imageCompression from 'browser-image-compression'
 import Masonry from 'react-masonry-css'
 import { auth, db } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
+import { getCommonCodes } from './lib/admin'
 
 function App() {
   const location = useLocation()
@@ -22,6 +23,8 @@ function App() {
   const [selectedPlace, setSelectedPlace] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [postPlace, setPostPlace] = useState('')
+  const [postCategory, setPostCategory] = useState('')
+  const [postCustomPlace, setPostCustomPlace] = useState('')
   const [postVibe, setPostVibe] = useState('')
   const [postDescription, setPostDescription] = useState('')
   const [postMainImage, setPostMainImage] = useState(null)
@@ -41,6 +44,7 @@ function App() {
   const [hotSpots, setHotSpots] = useState([]) // 팝업스토어 목록 (Supabase에서 로드)
   const [isLoadingPosts, setIsLoadingPosts] = useState(true) // 포스트 로딩 상태
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
+  const [categories, setCategories] = useState([]) // 카테고리 목록
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
@@ -178,6 +182,7 @@ function App() {
           id: place.id,
           name: place.name,
           nameEn: place.nameEn || place.name,
+          type: place.type || 'other',
           status: place.status || '🟢 Quiet',
           wait: place.wait || 'Quiet',
           lat: place.lat,
@@ -410,8 +415,44 @@ function App() {
     }
   }, [showLoginModal])
 
-  // Post Vibe 모달에서 사용할 장소 목록 (hotSpots에서 가져오고 'Other' 옵션 추가)
-  const places = [...hotSpots.map(spot => spot.name), 'Other']
+  // 카테고리 목록 로드
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const categoryCodes = await getCommonCodes('place_category', false)
+        setCategories(categoryCodes)
+      } catch (error) {
+        console.error('Error loading categories:', error)
+      }
+    }
+    loadCategories()
+  }, [])
+
+  // Post Vibe 모달에서 사용할 장소 목록 (카테고리별로 필터링)
+  const getFilteredPlaces = () => {
+    if (!postCategory || postCategory === 'other') {
+      return []
+    }
+    
+    // 선택한 카테고리에 해당하는 장소만 필터링
+    const filtered = hotSpots.filter(spot => spot.type === postCategory)
+    
+    // 거리 정보가 있으면 거리순으로 정렬
+    if (userLocation) {
+      return filtered.sort((a, b) => {
+        if (a.distance !== undefined && b.distance !== undefined) {
+          return a.distance - b.distance
+        }
+        if (a.distance !== undefined) return -1
+        if (b.distance !== undefined) return 1
+        return a.name.localeCompare(b.name)
+      })
+    }
+    
+    return filtered.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  
+  const filteredPlaces = getFilteredPlaces()
   const vibeOptions = [
     { id: 'verybusy', label: '🔥 Very Busy', emoji: '🔥', description: '40min+' },
     { id: 'busy', label: '⏱️ Busy', emoji: '⏱️', description: '10-20min' },
@@ -660,6 +701,8 @@ function App() {
   const handleCloseModal = () => {
     setIsModalOpen(false)
     setPostPlace('')
+    setPostCategory('')
+    setPostCustomPlace('')
     setPostVibe('')
     setPostDescription('')
     setPostMainImage(null)
@@ -848,9 +891,28 @@ function App() {
   }
 
   const handlePostVibe = async () => {
-    if (!postPlace || !postVibe) {
-      alert('Please select a place and vibe status')
+    if (!postVibe) {
+      alert('Please select a vibe status')
       return
+    }
+    
+    // 카테고리 선택 확인
+    if (!postCategory) {
+      alert('Please select a category')
+      return
+    }
+    
+    // 장소 선택 확인
+    if (postCategory === 'other') {
+      if (!postCustomPlace || !postCustomPlace.trim()) {
+        alert('Please enter a place name')
+        return
+      }
+    } else {
+      if (!postPlace) {
+        alert('Please select a place')
+        return
+      }
     }
 
     if (!postMainImage || !postMetadata) {
@@ -897,13 +959,17 @@ function App() {
       }
 
       // 2. 장소 ID 찾기 (hotSpots에서 찾거나 null)
-      const selectedPlace = hotSpots.find((p) => p.name === postPlace)
+      const selectedPlace = postCategory !== 'other' ? hotSpots.find((p) => p.name === postPlace) : null
       const placeId = selectedPlace?.id || null
+      
+      // 장소명 결정 (카테고리별)
+      const finalPlaceName = postCategory === 'other' ? postCustomPlace.trim() : postPlace
 
       // 3. Supabase에 포스트 저장
+      
       const postData = {
         placeId: placeId,
-        placeName: postPlace,
+        placeName: finalPlaceName,
         vibe: postVibe,
         description: postDescription.trim() || null,
         mainImageUrl: mainImageData.publicUrl,
@@ -1151,55 +1217,139 @@ function App() {
           </div>
         )}
 
-        {/* Hot Spots Now Section */}
-        <div className="max-w-6xl mx-auto px-4 py-4">
-          <h2 className="text-lg font-bold mb-3 text-gray-300">Hot Spots Now</h2>
+        {/* Hot Spots Now Section - 카테고리별 분리 */}
+        <div className="max-w-6xl mx-auto px-4 py-4 space-y-6">
           {isLoadingPlaces ? (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 min-w-[200px] animate-pulse">
-                  <div className="h-4 bg-gray-700 rounded mb-2"></div>
-                  <div className="h-3 bg-gray-700 rounded mb-2 w-2/3"></div>
-                  <div className="h-3 bg-gray-700 rounded w-1/2"></div>
+            <>
+              <div>
+                <h2 className="text-lg font-bold mb-3 text-gray-300">Pop-up Stores</h2>
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 min-w-[200px] animate-pulse">
+                      <div className="h-4 bg-gray-700 rounded mb-2"></div>
+                      <div className="h-3 bg-gray-700 rounded mb-2 w-2/3"></div>
+                      <div className="h-3 bg-gray-700 rounded w-1/2"></div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            </>
           ) : placesError ? (
             <div className="text-center py-8">
               <p className="text-red-400 text-sm">{placesError}</p>
             </div>
-          ) : hotSpots.length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-              {hotSpots.map((spot) => (
-                <div
-                  key={spot.id}
-                  onClick={() => handlePlaceClick(spot.id)}
-                  className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
-                    spotFilter === spot.id
-                      ? 'border-[#ADFF2F] bg-[#ADFF2F]/10'
-                      : 'border-gray-800 hover:border-[#ADFF2F]/50'
-                  }`}
-                >
-                  <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
-                  <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
-                    <span className="text-xs text-gray-500">•</span>
-                    <span className="text-xs text-gray-400">{spot.wait}</span>
-                    {spot.distance !== undefined && (
-                      <>
-                        <span className="text-xs text-gray-500">•</span>
-                        <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
           ) : (
-            <div className="text-center py-8">
-              <p className="text-gray-400 text-sm">No pop-up stores available</p>
-            </div>
+            <>
+              {/* 팝업스토어 섹션 (메인) */}
+              {(() => {
+                const popupStores = hotSpots.filter(spot => spot.type === 'popup_store')
+                if (popupStores.length > 0) {
+                  return (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <h2 className="text-xl font-bold text-[#ADFF2F]">Pop-up Stores</h2>
+                        <span className="text-xs text-gray-400">({popupStores.length})</span>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                        {popupStores.map((spot) => (
+                          <div
+                            key={spot.id}
+                            onClick={() => handlePlaceClick(spot.id)}
+                            className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
+                              spotFilter === spot.id
+                                ? 'border-[#ADFF2F] bg-[#ADFF2F]/10 ring-2 ring-[#ADFF2F]/50'
+                                : 'border-gray-800 hover:border-[#ADFF2F]/50'
+                            }`}
+                          >
+                            <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
+                            <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
+                              <span className="text-xs text-gray-500">•</span>
+                              <span className="text-xs text-gray-400">{spot.wait}</span>
+                              {spot.distance !== undefined && (
+                                <>
+                                  <span className="text-xs text-gray-500">•</span>
+                                  <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {/* 다른 카테고리 통합 섹션 (식당 & 쇼핑) */}
+              {(() => {
+                const otherCategories = hotSpots.filter(spot => 
+                  spot.type === 'restaurant' || spot.type === 'shop'
+                )
+                if (otherCategories.length > 0) {
+                  // 카테고리별로 그룹화
+                  const restaurants = otherCategories.filter(spot => spot.type === 'restaurant')
+                  const shops = otherCategories.filter(spot => spot.type === 'shop')
+                  
+                  return (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <h2 className="text-lg font-bold text-gray-300">
+                          {restaurants.length > 0 && shops.length > 0 
+                            ? 'Restaurants & Shopping'
+                            : restaurants.length > 0 
+                            ? 'Restaurants'
+                            : 'Shopping'}
+                        </h2>
+                        <span className="text-xs text-gray-400">({otherCategories.length})</span>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                        {otherCategories.map((spot) => (
+                          <div
+                            key={spot.id}
+                            onClick={() => handlePlaceClick(spot.id)}
+                            className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
+                              spotFilter === spot.id
+                                ? 'border-[#ADFF2F] bg-[#ADFF2F]/10'
+                                : 'border-gray-800 hover:border-[#ADFF2F]/50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-bold text-sm">{spot.name}</h3>
+                              <span className="text-xs text-gray-500">
+                                {spot.type === 'restaurant' ? '🍽️' : '🛍️'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
+                              <span className="text-xs text-gray-500">•</span>
+                              <span className="text-xs text-gray-400">{spot.wait}</span>
+                              {spot.distance !== undefined && (
+                                <>
+                                  <span className="text-xs text-gray-500">•</span>
+                                  <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {/* 모든 카테고리가 비어있을 때 */}
+              {hotSpots.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-gray-400 text-sm">No places available</p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1388,15 +1538,21 @@ function App() {
         {/* Post Vibe Modal */}
         {isModalOpen && (
           <PostVibeModal
-            places={places}
-            vibeOptions={vibeOptions}
+            categories={categories}
+            places={filteredPlaces}
+            selectedCategory={postCategory}
             selectedPlace={postPlace}
+            selectedCustomPlace={postCustomPlace}
+            vibeOptions={vibeOptions}
             selectedVibe={postVibe}
             selectedDescription={postDescription}
             mainImage={postMainImage}
             additionalImages={postAdditionalImages}
             metadata={postMetadata}
+            userLocation={userLocation}
+            onCategoryChange={setPostCategory}
             onPlaceChange={setPostPlace}
+            onCustomPlaceChange={setPostCustomPlace}
             onVibeChange={setPostVibe}
             onDescriptionChange={setPostDescription}
             onMainImageSelect={handleMainImageSelect}
@@ -1406,6 +1562,7 @@ function App() {
             onClose={handleCloseModal}
             formatCapturedTime={formatCapturedTime}
             formatDate={formatDate}
+            formatDistance={formatDistance}
             isPosting={isPosting}
           />
         )}
@@ -2347,15 +2504,21 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
 
 // Post Vibe Modal Component
 function PostVibeModal({
+  categories,
   places,
-  vibeOptions,
+  selectedCategory,
   selectedPlace,
+  selectedCustomPlace,
+  vibeOptions,
   selectedVibe,
   selectedDescription,
   mainImage,
   additionalImages,
   metadata,
+  userLocation,
+  onCategoryChange,
   onPlaceChange,
+  onCustomPlaceChange,
   onVibeChange,
   onDescriptionChange,
   onMainImageSelect,
@@ -2365,13 +2528,14 @@ function PostVibeModal({
   onClose,
   formatCapturedTime,
   formatDate,
+  formatDistance,
   isPosting = false,
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
 
-  const handlePlaceSelect = (place) => {
-    onPlaceChange(place)
+  const handlePlaceSelect = (placeName) => {
+    onPlaceChange(placeName)
     setIsDropdownOpen(false)
   }
 
@@ -2428,67 +2592,116 @@ function PostVibeModal({
         <div className="flex-1 overflow-y-auto">
           <div className="p-6 space-y-6">
 
-          <div className="space-y-2 relative" ref={dropdownRef}>
+          {/* Category Selection */}
+          <div className="space-y-2">
             <label className="text-sm font-semibold text-gray-400">
-              Where are you?
+              Category
             </label>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 pr-3 text-left text-white focus:outline-none focus:border-[#ADFF2F] transition-colors flex items-center justify-between"
-              >
-                <span className={selectedPlace ? '' : 'text-gray-500'}>
-                  {selectedPlaceLabel}
-                </span>
-                <svg
-                  className={`w-5 h-5 text-[#ADFF2F] transition-transform flex-shrink-0 ${
-                    isDropdownOpen ? 'rotate-180' : ''
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {categories.map((category) => (
+                <button
+                  key={category.code_value}
+                  type="button"
+                  onClick={() => {
+                    onCategoryChange(category.code_value)
+                    onPlaceChange('') // 카테고리 변경 시 장소 초기화
+                    onCustomPlaceChange('') // 커스텀 장소도 초기화
+                  }}
+                  className={`py-3 px-2 rounded-lg border-2 transition-all duration-200 ${
+                    selectedCategory === category.code_value
+                      ? 'border-[#ADFF2F] bg-[#ADFF2F]/20 text-[#ADFF2F]'
+                      : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
                   }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-
-              {isDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => handlePlaceSelect('')}
-                    className={`w-full px-4 py-3 text-left text-sm transition-colors ${
-                      !selectedPlace
-                        ? 'bg-gray-700 text-[#ADFF2F]'
-                        : 'text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    Select a place
-                  </button>
-                  {places.map((place) => (
-                    <button
-                      key={place}
-                      type="button"
-                      onClick={() => handlePlaceSelect(place)}
-                      className={`w-full px-4 py-3 text-left text-sm transition-colors ${
-                        selectedPlace === place
-                          ? 'bg-gray-700 text-[#ADFF2F]'
-                          : 'text-white hover:bg-gray-700'
-                      }`}
-                    >
-                      {place}
-                    </button>
-                  ))}
-                </div>
-              )}
+                  <div className="text-xs font-semibold">
+                    {category.code_label}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
+
+          {/* Place Selection */}
+          {selectedCategory && selectedCategory !== 'other' && (
+            <div className="space-y-2 relative" ref={dropdownRef}>
+              <label className="text-sm font-semibold text-gray-400">
+                Where are you?
+              </label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 pr-3 text-left text-white focus:outline-none focus:border-[#ADFF2F] transition-colors flex items-center justify-between"
+                >
+                  <span className={selectedPlace ? '' : 'text-gray-500'}>
+                    {selectedPlace || 'Select a place'}
+                  </span>
+                  <svg
+                    className={`w-5 h-5 text-[#ADFF2F] transition-transform flex-shrink-0 ${
+                      isDropdownOpen ? 'rotate-180' : ''
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+
+                {isDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    {places.length > 0 ? (
+                      places.map((place) => (
+                        <button
+                          key={place.id || place.name}
+                          type="button"
+                          onClick={() => handlePlaceSelect(place.name)}
+                          className={`w-full px-4 py-3 text-left text-sm transition-colors flex items-center justify-between ${
+                            selectedPlace === place.name
+                              ? 'bg-gray-700 text-[#ADFF2F]'
+                              : 'text-white hover:bg-gray-700'
+                          }`}
+                        >
+                          <span>{place.name}</span>
+                          {userLocation && place.distance !== undefined && (
+                            <span className="text-xs text-gray-400 ml-2">
+                              {formatDistance(place.distance)}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-gray-400 text-center">
+                        No places available in this category
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Custom Place Input (for "other" category) */}
+          {selectedCategory === 'other' && (
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-gray-400">
+                Place Name
+              </label>
+              <input
+                type="text"
+                value={selectedCustomPlace}
+                onChange={(e) => onCustomPlaceChange(e.target.value)}
+                placeholder="Enter place name..."
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#ADFF2F] transition-colors"
+                maxLength={100}
+              />
+            </div>
+          )}
 
           <div className="space-y-3">
             <label className="text-sm font-semibold text-gray-400">

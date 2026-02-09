@@ -171,6 +171,7 @@ export const db = {
       id: place.id,
       name: place.name,
       nameEn: place.name_en,
+      type: place.type,
       status: place.status,
       wait: place.wait_time,
       lat: place.lat,
