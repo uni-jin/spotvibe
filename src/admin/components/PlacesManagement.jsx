@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
 import imageCompression from 'browser-image-compression'
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -515,18 +515,22 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
       ? [parseFloat(place.lat), parseFloat(place.lng)]
       : [37.5446, 127.0559] // 기본값: 성수동
   )
+  const [mapZoom, setMapZoom] = useState(place?.lat && place?.lng ? 16 : 13)
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     
-    // 위도/경도가 직접 입력되면 마커 위치도 업데이트
+    // 위도/경도가 직접 입력되면 마커 위치와 지도 중심 업데이트
+    // (직접 입력 시에만 mapCenter 업데이트하여 지도 재생성 방지)
     if (field === 'lat' || field === 'lng') {
       const lat = field === 'lat' ? parseFloat(value) : parseFloat(formData.lat)
       const lng = field === 'lng' ? parseFloat(value) : parseFloat(formData.lng)
       
       if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
         setMarkerPosition([lat, lng])
+        // 직접 입력 시에만 mapCenter 업데이트 (지도 클릭/드래그 시에는 업데이트하지 않음)
         setMapCenter([lat, lng])
+        setMapZoom(16) // 직접 입력 시에는 확대
       }
     }
   }
@@ -547,14 +551,41 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
 
   // Map click handler component
   const MapClickHandler = () => {
+    const map = useMap()
+    
     useMapEvents({
       click: (e) => {
         const { lat, lng } = e.latlng
+        // 지도 클릭 시에는 mapCenter를 업데이트하지 않음 (지도 재생성 방지)
         setMarkerPosition([lat, lng])
-        handleInputChange('lat', lat.toString())
-        handleInputChange('lng', lng.toString())
+        // formData만 업데이트 (mapCenter는 업데이트하지 않음)
+        setFormData(prev => ({
+          ...prev,
+          lat: lat.toString(),
+          lng: lng.toString(),
+        }))
+        // 현재 zoom 레벨 유지
+        setMapZoom(map.getZoom())
+      },
+      zoomend: () => {
+        // 사용자가 확대/축소할 때 zoom 상태 업데이트
+        setMapZoom(map.getZoom())
       },
     })
+    return null
+  }
+  
+  // Map center sync component (직접 좌표 입력 시에만 지도 중심 이동)
+  const MapCenterSync = () => {
+    const map = useMap()
+    
+    useEffect(() => {
+      // mapCenter가 변경되었을 때만 지도 중심 이동 (직접 좌표 입력 시)
+      if (mapCenter[0] !== map.getCenter().lat || mapCenter[1] !== map.getCenter().lng) {
+        map.setView(mapCenter, mapZoom, { animate: true, duration: 0.3 })
+      }
+    }, [mapCenter, mapZoom, map])
+    
     return null
   }
 
@@ -757,9 +788,9 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
           <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '400px', position: 'relative' }}>
             {typeof window !== 'undefined' && (
               <MapContainer
-                key={`map-${mapCenter[0]}-${mapCenter[1]}`}
+                key="place-form-map" // 고정 key 사용 (지도 재생성 방지)
                 center={mapCenter}
-                zoom={markerPosition ? 16 : 13}
+                zoom={mapZoom}
                 style={{ height: '100%', width: '100%', zIndex: 1 }}
                 className="dark-map"
                 scrollWheelZoom={true}
@@ -784,9 +815,14 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
                       dragend: (e) => {
                         const marker = e.target
                         const position = marker.getLatLng()
+                        // 드래그 종료 시에는 mapCenter를 업데이트하지 않음 (지도 재생성 방지)
                         setMarkerPosition([position.lat, position.lng])
-                        handleInputChange('lat', position.lat.toString())
-                        handleInputChange('lng', position.lng.toString())
+                        // formData만 업데이트 (mapCenter는 업데이트하지 않음)
+                        setFormData(prev => ({
+                          ...prev,
+                          lat: position.lat.toString(),
+                          lng: position.lng.toString(),
+                        }))
                       },
                     }}
                   />
