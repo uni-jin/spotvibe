@@ -6,6 +6,7 @@ import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
 import Masonry from 'react-masonry-css'
 import { auth, db } from './lib/supabase'
+import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 
 function App() {
   const [currentView, setCurrentView] = useState('home')
@@ -37,6 +38,7 @@ function App() {
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false) // 삭제 확인 모달 표시 여부
   const [postToDelete, setPostToDelete] = useState(null) // 삭제할 포스트 ID
+  const [userLocation, setUserLocation] = useState(null) // { lat: number, lng: number } | null
 
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
@@ -55,6 +57,17 @@ function App() {
         setCurrentView('feed')
       }
     }
+  }, [])
+
+  // 사용자 위치 가져오기
+  useEffect(() => {
+    const fetchUserLocation = async () => {
+      const location = await getUserLocation()
+      if (location) {
+        setUserLocation(location)
+      }
+    }
+    fetchUserLocation()
   }, [])
 
   // 브라우저 뒤로가기 처리
@@ -144,22 +157,99 @@ function App() {
     loadPosts()
   }, [user])
 
-  // Supabase에서 팝업스토어 목록 로드
+  // Supabase에서 팝업스토어 목록 로드 및 정렬
   useEffect(() => {
     const loadPlaces = async () => {
       try {
         setIsLoadingPlaces(true)
         setPlacesError(null)
         const places = await db.getPlaces()
+        
         // places를 hotSpots 형식으로 변환
-        // status는 places 테이블의 wait_time 필드를 사용하거나 기본값 사용
-        const formattedPlaces = places.map((place) => ({
+        let formattedPlaces = places.map((place) => ({
           id: place.id,
           name: place.name,
           nameEn: place.nameEn || place.name,
           status: place.status || '🟢 Quiet',
           wait: place.wait || 'Quiet',
+          lat: place.lat,
+          lng: place.lng,
         }))
+
+        // 정렬 로직
+        if (userLocation) {
+          // GPS 위치가 있을 때: 거리순 정렬
+          formattedPlaces = formattedPlaces.map((place) => {
+            if (place.lat && place.lng) {
+              const distance = calculateDistance(
+                userLocation.lat,
+                userLocation.lng,
+                place.lat,
+                place.lng
+              )
+              return { ...place, distance }
+            }
+            return place
+          }).sort((a, b) => {
+            // 거리가 있는 것부터 정렬, 그 다음 거리순
+            if (a.distance !== undefined && b.distance !== undefined) {
+              return a.distance - b.distance
+            }
+            if (a.distance !== undefined) return -1
+            if (b.distance !== undefined) return 1
+            return 0
+          })
+        } else {
+          // GPS 위치가 없을 때: 포스팅 수 → 최신 포스팅 시간 → 이름순
+          // 각 place에 대한 포스팅 통계 계산
+          const placeStats = {}
+          vibePosts.forEach((post) => {
+            const placeName = post.placeName || post.place_name
+            if (!placeName) return
+
+            if (!placeStats[placeName]) {
+              placeStats[placeName] = {
+                count: 0,
+                latestTimestamp: null,
+              }
+            }
+
+            placeStats[placeName].count++
+            
+            const postTime = post.timestamp 
+              ? new Date(post.timestamp).getTime()
+              : (post.metadata?.capturedAt 
+                  ? new Date(post.metadata.capturedAt).getTime()
+                  : 0)
+            
+            if (!placeStats[placeName].latestTimestamp || 
+                postTime > placeStats[placeName].latestTimestamp) {
+              placeStats[placeName].latestTimestamp = postTime
+            }
+          })
+
+          // 정렬: 포스팅 수 (내림차순) → 최신 포스팅 시간 (내림차순) → 이름 (오름차순)
+          formattedPlaces = formattedPlaces.map((place) => {
+            const stats = placeStats[place.name] || { count: 0, latestTimestamp: 0 }
+            return {
+              ...place,
+              postCount: stats.count,
+              latestPostTime: stats.latestTimestamp,
+            }
+          }).sort((a, b) => {
+            // 1. 포스팅 수 (내림차순)
+            if (a.postCount !== b.postCount) {
+              return b.postCount - a.postCount
+            }
+            // 2. 최신 포스팅 시간 (내림차순)
+            if (a.latestPostTime !== b.latestPostTime) {
+              return (b.latestPostTime || 0) - (a.latestPostTime || 0)
+            }
+            // 3. 이름순 (오름차순)
+            return a.name.localeCompare(b.name)
+          })
+        }
+
         setHotSpots(formattedPlaces)
       } catch (error) {
         console.error('Error loading places:', error)
@@ -170,7 +260,7 @@ function App() {
     }
 
     loadPlaces()
-  }, [])
+  }, [userLocation, vibePosts])
 
   // 사용자 세션 확인 및 인증 상태 관리
   useEffect(() => {
@@ -1084,10 +1174,16 @@ function App() {
                 >
                   <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
                   <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
                     <span className="text-xs text-gray-500">•</span>
                     <span className="text-xs text-gray-400">{spot.wait}</span>
+                    {spot.distance !== undefined && (
+                      <>
+                        <span className="text-xs text-gray-500">•</span>
+                        <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
