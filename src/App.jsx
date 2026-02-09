@@ -67,8 +67,12 @@ function App() {
     if (savedRegionId) {
       const savedRegion = regions.find((r) => r.id === savedRegionId)
       if (savedRegion && savedRegion.active) {
+        // selectedRegion을 먼저 설정한 후, 다음 렌더링 사이클에서 currentView 변경
         setSelectedRegion(savedRegion)
-        setCurrentView('feed')
+        // 상태 업데이트가 완료된 후 currentView 변경을 보장하기 위해 약간의 지연
+        setTimeout(() => {
+          setCurrentView('feed')
+        }, 0)
       }
     }
   }, [])
@@ -1292,6 +1296,12 @@ function App() {
   }, [currentView])
 
   if (currentView === 'feed') {
+    // selectedRegion이 없으면 home으로 리다이렉트
+    if (!selectedRegion) {
+      setCurrentView('home')
+      return null
+    }
+    
     const filteredPosts = getFilteredPosts()
     const filteredSpot = spotFilter ? hotSpots.find((s) => s.id === spotFilter) : null
 
@@ -2170,10 +2180,24 @@ function App() {
   }
 
   // Default fallback - should not reach here, but just in case
+  // currentView가 예상치 못한 값이면 home으로 리다이렉트
+  useEffect(() => {
+    if (currentView !== 'home' && currentView !== 'feed' && currentView !== 'map' && 
+        currentView !== 'quest' && currentView !== 'my' && currentView !== 'post-detail') {
+      setCurrentView('home')
+    }
+  }, [currentView])
+  
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
       <div className="text-center">
-        <p className="text-gray-400">Loading...</p>
+        <p className="text-gray-400 mb-4">Loading...</p>
+        <button
+          onClick={() => setCurrentView('home')}
+          className="px-4 py-2 bg-[#ADFF2F] text-black font-semibold rounded-lg hover:bg-[#ADFF2F]/90"
+        >
+          Go to Home
+        </button>
       </div>
     </div>
   )
