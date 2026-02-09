@@ -19,6 +19,8 @@ const PlacesManagement = () => {
   const [searchCategory, setSearchCategory] = useState('')
   const [searchActive, setSearchActive] = useState('')
   const [searchDisplayStatus, setSearchDisplayStatus] = useState('')
+  const [searchDisplayStartDate, setSearchDisplayStartDate] = useState('')
+  const [searchDisplayEndDate, setSearchDisplayEndDate] = useState('')
 
   useEffect(() => {
     loadData()
@@ -26,7 +28,7 @@ const PlacesManagement = () => {
 
   useEffect(() => {
     filterPlaces()
-  }, [places, searchName, searchCategory, searchActive, searchDisplayStatus])
+  }, [places, searchName, searchCategory, searchActive, searchDisplayStatus, searchDisplayStartDate, searchDisplayEndDate])
 
   const loadData = async () => {
     try {
@@ -63,6 +65,82 @@ const PlacesManagement = () => {
     if (searchActive !== '') {
       const isActive = searchActive === 'true'
       filtered = filtered.filter(place => place.is_active === isActive)
+    }
+
+    // Filter by display status
+    if (searchDisplayStatus) {
+      const now = new Date()
+      // Convert to KST (UTC+9)
+      const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000))
+      
+      filtered = filtered.filter(place => {
+        const start = place.display_start_date ? new Date(place.display_start_date) : null
+        const end = place.display_end_date ? new Date(place.display_end_date) : null
+        
+        switch(searchDisplayStatus) {
+          case 'active': // 현재 노출 중
+            return (!start || start <= kstNow) && (!end || end >= kstNow)
+          case 'scheduled': // 노출 예정
+            return start && start > kstNow
+          case 'expired': // 노출 종료
+            return end && end < kstNow
+          case 'unlimited': // 무제한
+            return !start && !end
+          default:
+            return true
+        }
+      })
+    }
+
+    // Filter by display period date range
+    if (searchDisplayStartDate || searchDisplayEndDate) {
+      filtered = filtered.filter(place => {
+        const placeStart = place.display_start_date ? new Date(place.display_start_date) : null
+        const placeEnd = place.display_end_date ? new Date(place.display_end_date) : null
+        
+        // Convert search dates to KST for comparison
+        let searchStartKST = null
+        let searchEndKST = null
+        
+        if (searchDisplayStartDate) {
+          const searchStart = new Date(searchDisplayStartDate)
+          searchStartKST = new Date(searchStart.getTime() + (9 * 60 * 60 * 1000))
+          // Set to start of day
+          searchStartKST.setHours(0, 0, 0, 0)
+        }
+        
+        if (searchDisplayEndDate) {
+          const searchEnd = new Date(searchDisplayEndDate)
+          searchEndKST = new Date(searchEnd.getTime() + (9 * 60 * 60 * 1000))
+          // Set to end of day
+          searchEndKST.setHours(23, 59, 59, 999)
+        }
+        
+        // Convert place dates to KST
+        const placeStartKST = placeStart ? new Date(placeStart.getTime() + (9 * 60 * 60 * 1000)) : null
+        const placeEndKST = placeEnd ? new Date(placeEnd.getTime() + (9 * 60 * 60 * 1000)) : null
+        
+        // Check if place's display period overlaps with search period
+        // Place is included if:
+        // - Place has no start date OR place start <= search end (if search end exists)
+        // - Place has no end date OR place end >= search start (if search start exists)
+        // - If both search dates exist, place period should overlap with search period
+        
+        if (searchStartKST && searchEndKST) {
+          // Both dates provided: find places that overlap with the search period
+          const placeStartsBeforeSearchEnd = !placeStartKST || placeStartKST <= searchEndKST
+          const placeEndsAfterSearchStart = !placeEndKST || placeEndKST >= searchStartKST
+          return placeStartsBeforeSearchEnd && placeEndsAfterSearchStart
+        } else if (searchStartKST) {
+          // Only start date: find places that start on or before this date
+          return !placeStartKST || placeStartKST <= searchStartKST
+        } else if (searchEndKST) {
+          // Only end date: find places that end on or after this date
+          return !placeEndKST || placeEndKST >= searchEndKST
+        }
+        
+        return true
+      })
     }
 
     setFilteredPlaces(filtered)
@@ -177,6 +255,8 @@ const PlacesManagement = () => {
     setSearchCategory('')
     setSearchActive('')
     setSearchDisplayStatus('')
+    setSearchDisplayStartDate('')
+    setSearchDisplayEndDate('')
   }
 
   if (isLoading) {
@@ -218,7 +298,7 @@ const PlacesManagement = () => {
         <>
           {/* Search Filters */}
           <div className="bg-gray-900 rounded-lg p-4 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium mb-2 text-gray-300">장소명</label>
                 <input
@@ -255,6 +335,41 @@ const PlacesManagement = () => {
                   <option value="true">활성</option>
                   <option value="false">비활성</option>
                 </select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">노출 상태</label>
+                <select
+                  value={searchDisplayStatus}
+                  onChange={(e) => setSearchDisplayStatus(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                >
+                  <option value="">전체</option>
+                  <option value="active">노출 중</option>
+                  <option value="scheduled">노출 예정</option>
+                  <option value="expired">노출 종료</option>
+                  <option value="unlimited">무제한</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">노출 시작일 (이후)</label>
+                <input
+                  type="date"
+                  value={searchDisplayStartDate}
+                  onChange={(e) => setSearchDisplayStartDate(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">노출 종료일 (이전)</label>
+                <input
+                  type="date"
+                  value={searchDisplayEndDate}
+                  onChange={(e) => setSearchDisplayEndDate(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                />
               </div>
               <div className="flex items-end">
                 <button
