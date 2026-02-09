@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -9,6 +10,13 @@ import { auth, db } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 
 function App() {
+  const location = useLocation()
+  
+  // /admin 경로에서는 App 컴포넌트를 렌더링하지 않음
+  if (location.pathname.startsWith('/admin')) {
+    return null
+  }
+
   const [currentView, setCurrentView] = useState('home')
   const [selectedRegion, setSelectedRegion] = useState(null)
   const [selectedPlace, setSelectedPlace] = useState(null)
