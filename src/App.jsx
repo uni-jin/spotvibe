@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -531,6 +531,7 @@ function App() {
     
     // 스크롤을 최상단으로 강제 이동 (뷰 전환 전 - 모든 방법 시도)
     const forceScrollToTop = () => {
+      // 즉시 스크롤 초기화 (모든 방법)
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
       if (document.documentElement) {
         document.documentElement.scrollTop = 0
@@ -548,7 +549,8 @@ function App() {
       })
     }
     
-    // 즉시 실행 (여러 번)
+    // 즉시 실행 (여러 번) - setCurrentView 전에 확실히 초기화
+    forceScrollToTop()
     forceScrollToTop()
     forceScrollToTop()
     
@@ -557,18 +559,27 @@ function App() {
     
     // 브라우저 히스토리에 추가
     window.history.pushState({ view: 'post-detail', postId: originalPost.id }, '', `#post-${originalPost.id}`)
+    
+    // 상태 변경 전에 한 번 더 스크롤 초기화
+    requestAnimationFrame(() => {
+      forceScrollToTop()
+    })
+    
+    // 상태 변경 (이 시점에 스크롤은 이미 0으로 초기화됨)
     setSelectedPost(originalPost)
     setCurrentView('post-detail')
     
     // 뷰 전환 후에도 스크롤 위치 보장 (여러 타이밍에 걸쳐)
     requestAnimationFrame(() => {
-      forceScrollToTop()
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         forceScrollToTop()
         setTimeout(() => {
           forceScrollToTop()
-        }, 10)
-      }, 0)
+          setTimeout(() => {
+            forceScrollToTop()
+          }, 10)
+        }, 0)
+      })
     })
     
     // 추가 보장을 위해 더 긴 지연 후에도 실행
@@ -1266,6 +1277,21 @@ function App() {
   if (currentView === 'feed') {
     const filteredPosts = getFilteredPosts()
     const filteredSpot = spotFilter ? hotSpots.find((s) => s.id === spotFilter) : null
+
+    // Feed 뷰 언마운트 시 스크롤 위치 저장 방지
+    useEffect(() => {
+      return () => {
+        // Feed 뷰가 언마운트될 때 스크롤 위치를 초기화하여
+        // 다음 뷰(PostDetailView)로 전환 시 스크롤 위치가 유지되지 않도록 함
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+        if (document.documentElement) {
+          document.documentElement.scrollTop = 0
+        }
+        if (document.body) {
+          document.body.scrollTop = 0
+        }
+      }
+    }, [])
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
@@ -2182,7 +2208,8 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const vibeInfo = getVibeInfo(post.vibe || 'quiet')
   
   // 페이지 로드 시 스크롤을 최상단으로 강제 이동
-  useEffect(() => {
+  // useLayoutEffect 사용: DOM 업데이트 직후, 화면 페인트 전에 실행
+  useLayoutEffect(() => {
     // 강제 스크롤 함수 - 모든 방법을 시도
     const forceScrollToTop = () => {
       // 방법 1: window.scrollTo
@@ -2283,6 +2310,23 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       clearInterval(scrollCheckInterval)
     }, 2000)
   }, [post]) // post가 변경될 때마다 실행
+  
+  // 추가로 useEffect도 사용하여 브라우저 스크롤 복원 방지
+  useEffect(() => {
+    // 브라우저 스크롤 복원 방지
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual'
+    }
+    
+    // 컴포넌트 마운트 시 스크롤 초기화
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    if (document.documentElement) {
+      document.documentElement.scrollTop = 0
+    }
+    if (document.body) {
+      document.body.scrollTop = 0
+    }
+  }, [post])
 
   // 사용자 프로필 정보 로드
   useEffect(() => {
