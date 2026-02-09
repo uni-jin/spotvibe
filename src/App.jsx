@@ -2312,6 +2312,8 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
 
   // 사용자 프로필 정보 로드
   useEffect(() => {
+    if (!post) return
+    
     const loadUserProfile = async () => {
       if (post.userId || post.user) {
         const profile = await db.getUserProfile(post.userId || post.user)
@@ -2319,7 +2321,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       }
     }
     loadUserProfile()
-  }, [post.userId, post.user])
+  }, [post?.userId, post?.user])
   
   // Get all capture times
   const getCaptureTime = (index) => {
