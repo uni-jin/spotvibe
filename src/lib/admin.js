@@ -4,11 +4,12 @@
 
 import { supabase } from './supabase'
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import * as jose from 'jose'
 
 // JWT Secret - In production, this should be stored securely
 // For now, using a default secret (should be changed in production)
 const JWT_SECRET = import.meta.env.VITE_JWT_SECRET || 'spotvibe-admin-secret-key-change-in-production-2024'
+const secretKey = new TextEncoder().encode(JWT_SECRET)
 
 /**
  * Admin login
@@ -41,16 +42,16 @@ export const adminLogin = async (username, password) => {
       .update({ last_login_at: new Date().toISOString() })
       .eq('id', data.id)
 
-    // Generate JWT token
-    const token = jwt.sign(
-      { 
-        id: data.id, 
-        username: data.username,
-        type: 'admin'
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    )
+    // Generate JWT token using jose (browser-compatible)
+    const token = await new jose.SignJWT({
+      id: data.id,
+      username: data.username,
+      type: 'admin'
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('24h')
+      .sign(secretKey)
 
     return { success: true, token }
   } catch (error) {
@@ -66,9 +67,9 @@ export const adminLogin = async (username, password) => {
  */
 export const verifyAdminToken = async (token) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET)
+    const { payload } = await jose.jwtVerify(token, secretKey)
     
-    if (decoded.type !== 'admin') {
+    if (payload.type !== 'admin') {
       return { valid: false }
     }
 
@@ -76,7 +77,7 @@ export const verifyAdminToken = async (token) => {
     const { data, error } = await supabase
       .from('admin_accounts')
       .select('id, username')
-      .eq('id', decoded.id)
+      .eq('id', payload.id)
       .single()
 
     if (error || !data) {
