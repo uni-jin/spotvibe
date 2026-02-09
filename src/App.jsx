@@ -1928,7 +1928,14 @@ function App() {
     )
   }
 
-  return null
+  // Default fallback - should not reach here, but just in case
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    </div>
+  )
 }
 
   // Post Detail View Component (전체 화면)
