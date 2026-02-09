@@ -2188,12 +2188,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
   const [isSwiping, setIsSwiping] = useState(false)
   const [userProfile, setUserProfile] = useState(null)
   
-  // Post 데이터 검증 (Hook 호출 후에 검증)
-  // Hook은 항상 같은 순서로 호출되어야 하므로, 조건부 return은 Hook 호출 후에 해야 함
-  
-  const allImages = post.images || (post.image ? [post.image] : [])
-  const vibeInfo = getVibeInfo(post.vibe || 'quiet')
-  
+  // 모든 Hook을 먼저 호출 (Hook 규칙 준수)
   // 페이지 로드 시 스크롤을 최상단으로 강제 이동
   // useLayoutEffect 사용: DOM 업데이트 직후, 화면 페인트 전에 실행
   useLayoutEffect(() => {
