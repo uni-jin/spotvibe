@@ -88,6 +88,14 @@ function App() {
     fetchUserLocation()
   }, [])
 
+  // currentView가 예상치 못한 값이면 home으로 리다이렉트 (Hook은 조건부 렌더링 이전에 위치)
+  useEffect(() => {
+    if (currentView !== 'home' && currentView !== 'feed' && currentView !== 'map' && 
+        currentView !== 'quest' && currentView !== 'my' && currentView !== 'post-detail') {
+      setCurrentView('home')
+    }
+  }, [currentView])
+
   // 브라우저 뒤로가기 처리
   useEffect(() => {
     const handlePopState = (event) => {
@@ -2180,14 +2188,6 @@ function App() {
   }
 
   // Default fallback - should not reach here, but just in case
-  // currentView가 예상치 못한 값이면 home으로 리다이렉트
-  useEffect(() => {
-    if (currentView !== 'home' && currentView !== 'feed' && currentView !== 'map' && 
-        currentView !== 'quest' && currentView !== 'my' && currentView !== 'post-detail') {
-      setCurrentView('home')
-    }
-  }, [currentView])
-  
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
       <div className="text-center">
