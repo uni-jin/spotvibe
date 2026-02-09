@@ -1,6 +1,10 @@
 -- Add admin functions for place management (bypass RLS)
 -- These functions use SECURITY DEFINER to allow admin operations
 
+-- Drop existing function if it exists (with all possible signatures)
+DROP FUNCTION IF EXISTS admin_save_place(TEXT, TEXT, INTEGER, TEXT, TEXT, TEXT, DECIMAL, DECIMAL, BOOLEAN, TEXT, TIMESTAMP WITH TIME ZONE, TIMESTAMP WITH TIME ZONE) CASCADE;
+DROP FUNCTION IF EXISTS admin_save_place CASCADE;
+
 -- Function to create or update a place (admin only)
 CREATE OR REPLACE FUNCTION admin_save_place(
   p_name TEXT,
@@ -35,11 +39,10 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
-DECLARE
-  v_result RECORD;
 BEGIN
   IF p_id IS NOT NULL THEN
     -- Update existing place
+    RETURN QUERY
     UPDATE places
     SET
       name = p_name,
@@ -51,25 +54,28 @@ BEGIN
       lng = p_lng,
       is_active = p_is_active,
       region_id = p_region_id,
+      display_start_date = p_display_start_date,
+      display_end_date = p_display_end_date,
       updated_at = NOW()
-    WHERE id = p_id
-    RETURNING * INTO v_result;
-    
-    RETURN QUERY SELECT
-      v_result.id,
-      v_result.name,
-      v_result.name_en,
-      v_result.type,
-      v_result.thumbnail_url,
-      v_result.description,
-      v_result.lat,
-      v_result.lng,
-      v_result.is_active,
-      v_result.region_id,
-      v_result.created_at,
-      v_result.updated_at;
+    WHERE places.id = p_id
+    RETURNING
+      places.id,
+      places.name,
+      places.name_en,
+      places.type,
+      places.thumbnail_url,
+      places.description,
+      places.lat,
+      places.lng,
+      places.is_active,
+      places.region_id,
+      places.display_start_date,
+      places.display_end_date,
+      places.created_at,
+      places.updated_at;
   ELSE
     -- Create new place
+    RETURN QUERY
     INSERT INTO places (
       name,
       name_en,
@@ -79,7 +85,9 @@ BEGIN
       lat,
       lng,
       is_active,
-      region_id
+      region_id,
+      display_start_date,
+      display_end_date
     )
     VALUES (
       p_name,
@@ -90,23 +98,25 @@ BEGIN
       p_lat,
       p_lng,
       p_is_active,
-      p_region_id
+      p_region_id,
+      p_display_start_date,
+      p_display_end_date
     )
-    RETURNING * INTO v_result;
-    
-    RETURN QUERY SELECT
-      v_result.id,
-      v_result.name,
-      v_result.name_en,
-      v_result.type,
-      v_result.thumbnail_url,
-      v_result.description,
-      v_result.lat,
-      v_result.lng,
-      v_result.is_active,
-      v_result.region_id,
-      v_result.created_at,
-      v_result.updated_at;
+    RETURNING
+      places.id,
+      places.name,
+      places.name_en,
+      places.type,
+      places.thumbnail_url,
+      places.description,
+      places.lat,
+      places.lng,
+      places.is_active,
+      places.region_id,
+      places.display_start_date,
+      places.display_end_date,
+      places.created_at,
+      places.updated_at;
   END IF;
 END;
 $$;
@@ -118,7 +128,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  DELETE FROM places WHERE id = p_id;
+  DELETE FROM places WHERE places.id = p_id;
   RETURN FOUND;
 END;
 $$;

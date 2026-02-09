@@ -45,6 +45,7 @@ function App() {
   const [isLoadingPosts, setIsLoadingPosts] = useState(true) // 포스트 로딩 상태
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
   const [categories, setCategories] = useState([]) // 카테고리 목록
+  const [selectedHotSpotCategory, setSelectedHotSpotCategory] = useState('popup_store') // Hot Spots Now에서 선택된 카테고리
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
@@ -421,6 +422,15 @@ function App() {
       try {
         const categoryCodes = await getCommonCodes('place_category', false)
         setCategories(categoryCodes)
+        // 기본 카테고리 설정 (popup_store가 있으면 그것, 없으면 첫 번째)
+        if (categoryCodes.length > 0) {
+          const popupStoreCategory = categoryCodes.find(cat => cat.code_value === 'popup_store')
+          if (popupStoreCategory) {
+            setSelectedHotSpotCategory('popup_store')
+          } else {
+            setSelectedHotSpotCategory(categoryCodes[0].code_value)
+          }
+        }
       } catch (error) {
         console.error('Error loading categories:', error)
       }
@@ -1217,140 +1227,100 @@ function App() {
           </div>
         )}
 
-        {/* Hot Spots Now Section - 카테고리별 분리 */}
-        <div className="max-w-6xl mx-auto px-4 py-4 space-y-6">
+        {/* Hot Spots Now Section - 탭 방식 */}
+        <div className="max-w-6xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-gray-300">Hot Spots Now</h2>
+          </div>
+
+          {/* 카테고리 탭 */}
+          {categories.length > 0 && (
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+              {categories.map((category) => {
+                const categorySpots = hotSpots.filter(spot => spot.type === category.code_value)
+                const isSelected = selectedHotSpotCategory === category.code_value
+                
+                return (
+                  <button
+                    key={category.code_value}
+                    onClick={() => setSelectedHotSpotCategory(category.code_value)}
+                    className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                      isSelected
+                        ? 'bg-[#ADFF2F] text-black'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                    }`}
+                  >
+                    {category.code_label}
+                    {categorySpots.length > 0 && (
+                      <span className={`ml-2 text-xs ${isSelected ? 'text-black/70' : 'text-gray-500'}`}>
+                        ({categorySpots.length})
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 선택한 카테고리의 장소 표시 */}
           {isLoadingPlaces ? (
-            <>
-              <div>
-                <h2 className="text-lg font-bold mb-3 text-gray-300">Pop-up Stores</h2>
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 min-w-[200px] animate-pulse">
-                      <div className="h-4 bg-gray-700 rounded mb-2"></div>
-                      <div className="h-3 bg-gray-700 rounded mb-2 w-2/3"></div>
-                      <div className="h-3 bg-gray-700 rounded w-1/2"></div>
-                    </div>
-                  ))}
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 min-w-[200px] animate-pulse">
+                  <div className="h-4 bg-gray-700 rounded mb-2"></div>
+                  <div className="h-3 bg-gray-700 rounded mb-2 w-2/3"></div>
+                  <div className="h-3 bg-gray-700 rounded w-1/2"></div>
                 </div>
-              </div>
-            </>
+              ))}
+            </div>
           ) : placesError ? (
             <div className="text-center py-8">
               <p className="text-red-400 text-sm">{placesError}</p>
             </div>
-          ) : (
-            <>
-              {/* 팝업스토어 섹션 (메인) */}
-              {(() => {
-                const popupStores = hotSpots.filter(spot => spot.type === 'popup_store')
-                if (popupStores.length > 0) {
-                  return (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <h2 className="text-xl font-bold text-[#ADFF2F]">Pop-up Stores</h2>
-                        <span className="text-xs text-gray-400">({popupStores.length})</span>
-                      </div>
-                      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                        {popupStores.map((spot) => (
-                          <div
-                            key={spot.id}
-                            onClick={() => handlePlaceClick(spot.id)}
-                            className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
-                              spotFilter === spot.id
-                                ? 'border-[#ADFF2F] bg-[#ADFF2F]/10 ring-2 ring-[#ADFF2F]/50'
-                                : 'border-gray-800 hover:border-[#ADFF2F]/50'
-                            }`}
-                          >
-                            <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
-                            <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
-                              <span className="text-xs text-gray-500">•</span>
-                              <span className="text-xs text-gray-400">{spot.wait}</span>
-                              {spot.distance !== undefined && (
-                                <>
-                                  <span className="text-xs text-gray-500">•</span>
-                                  <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+          ) : (() => {
+            const filteredSpots = hotSpots.filter(spot => spot.type === selectedHotSpotCategory)
+            
+            if (filteredSpots.length > 0) {
+              return (
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                  {filteredSpots.map((spot) => (
+                    <div
+                      key={spot.id}
+                      onClick={() => handlePlaceClick(spot.id)}
+                      className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
+                        spotFilter === spot.id
+                          ? 'border-[#ADFF2F] bg-[#ADFF2F]/10 ring-2 ring-[#ADFF2F]/50'
+                          : 'border-gray-800 hover:border-[#ADFF2F]/50'
+                      }`}
+                    >
+                      <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
+                      <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
+                        <span className="text-xs text-gray-500">•</span>
+                        <span className="text-xs text-gray-400">{spot.wait}</span>
+                        {spot.distance !== undefined && (
+                          <>
+                            <span className="text-xs text-gray-500">•</span>
+                            <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
-                  )
-                }
-                return null
-              })()}
-
-              {/* 다른 카테고리 통합 섹션 (식당 & 쇼핑) */}
-              {(() => {
-                const otherCategories = hotSpots.filter(spot => 
-                  spot.type === 'restaurant' || spot.type === 'shop'
-                )
-                if (otherCategories.length > 0) {
-                  // 카테고리별로 그룹화
-                  const restaurants = otherCategories.filter(spot => spot.type === 'restaurant')
-                  const shops = otherCategories.filter(spot => spot.type === 'shop')
-                  
-                  return (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <h2 className="text-lg font-bold text-gray-300">
-                          {restaurants.length > 0 && shops.length > 0 
-                            ? 'Restaurants & Shopping'
-                            : restaurants.length > 0 
-                            ? 'Restaurants'
-                            : 'Shopping'}
-                        </h2>
-                        <span className="text-xs text-gray-400">({otherCategories.length})</span>
-                      </div>
-                      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                        {otherCategories.map((spot) => (
-                          <div
-                            key={spot.id}
-                            onClick={() => handlePlaceClick(spot.id)}
-                            className={`flex-shrink-0 bg-gray-900 border rounded-xl p-4 min-w-[200px] cursor-pointer transition-all ${
-                              spotFilter === spot.id
-                                ? 'border-[#ADFF2F] bg-[#ADFF2F]/10'
-                                : 'border-gray-800 hover:border-[#ADFF2F]/50'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-bold text-sm">{spot.name}</h3>
-                              <span className="text-xs text-gray-500">
-                                {spot.type === 'restaurant' ? '🍽️' : '🛍️'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
-                              <span className="text-xs text-gray-500">•</span>
-                              <span className="text-xs text-gray-400">{spot.wait}</span>
-                              {spot.distance !== undefined && (
-                                <>
-                                  <span className="text-xs text-gray-500">•</span>
-                                  <span className="text-xs text-gray-500">{formatDistance(spot.distance)}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                }
-                return null
-              })()}
-
-              {/* 모든 카테고리가 비어있을 때 */}
-              {hotSpots.length === 0 && (
-                <div className="text-center py-8">
-                  <p className="text-gray-400 text-sm">No places available</p>
+                  ))}
                 </div>
-              )}
-            </>
-          )}
+              )
+            } else {
+              const selectedCategory = categories.find(cat => cat.code_value === selectedHotSpotCategory)
+              return (
+                <div className="text-center py-8">
+                  <p className="text-gray-400 text-sm">
+                    No {selectedCategory?.code_label || 'places'} available
+                  </p>
+                </div>
+              )
+            }
+          })()}
         </div>
 
 
