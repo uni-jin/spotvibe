@@ -2177,7 +2177,7 @@ function App() {
   )
 }
 
-  // Post Detail View Component (전체 화면)
+// Post Detail View Component (전체 화면)
 function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo, postLikes, onToggleLike, user, onDeletePost }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
