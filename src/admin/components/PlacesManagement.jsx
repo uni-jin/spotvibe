@@ -49,8 +49,7 @@ const PlacesManagement = () => {
     // Filter by name
     if (searchName) {
       filtered = filtered.filter(place =>
-        place.name?.toLowerCase().includes(searchName.toLowerCase()) ||
-        place.name_en?.toLowerCase().includes(searchName.toLowerCase())
+        place.name?.toLowerCase().includes(searchName.toLowerCase())
       )
     }
 
@@ -217,12 +216,7 @@ const PlacesManagement = () => {
                       return (
                         <tr key={place.id} className="hover:bg-gray-800/50">
                           <td className="px-6 py-4">
-                            <div>
-                              <p className="font-medium">{place.name}</p>
-                              {place.name_en && (
-                                <p className="text-sm text-gray-400">{place.name_en}</p>
-                              )}
-                            </div>
+                            <p className="font-medium">{place.name}</p>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {category?.code_label_ko || place.type || '-'}
@@ -290,7 +284,6 @@ const PlacesManagement = () => {
 const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
     name: place?.name || '',
-    name_en: place?.name_en || '',
     type: place?.type || '',
     description: place?.description || '',
     lat: place?.lat || '',
@@ -395,7 +388,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
 
     // Validation
     if (!formData.name.trim()) {
-      setError('장소명(한글)을 입력해주세요.')
+      setError('장소명을 입력해주세요.')
       return
     }
 
@@ -425,10 +418,11 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         thumbnailUrl = uploadData.publicUrl
       }
 
-      // Save place
+      // Save place (name_en은 null로 설정)
       const result = await savePlace(
         {
           ...formData,
+          name_en: null, // 영문명 필드 제거
           thumbnail_url: thumbnailUrl,
         },
         place?.id || null
@@ -477,10 +471,10 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
           </select>
         </div>
 
-        {/* Name (Korean) */}
+        {/* Name */}
         <div>
           <label className="block text-sm font-medium mb-2 text-gray-300">
-            장소명 (한글) <span className="text-red-400">*</span>
+            장소명 <span className="text-red-400">*</span>
           </label>
           <input
             type="text"
@@ -489,20 +483,6 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
             required
             className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
             placeholder="예: 디올 성수"
-          />
-        </div>
-
-        {/* Name (English) */}
-        <div>
-          <label className="block text-sm font-medium mb-2 text-gray-300">
-            장소명 (영문) <span className="text-gray-500 text-xs">(선택)</span>
-          </label>
-          <input
-            type="text"
-            value={formData.name_en}
-            onChange={(e) => handleInputChange('name_en', e.target.value)}
-            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-            placeholder="예: Dior Seongsu"
           />
         </div>
 
@@ -538,36 +518,45 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
           </p>
           
           {/* Map */}
-          <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '400px' }}>
-            <MapContainer
-              center={mapCenter}
-              zoom={markerPosition ? 16 : 13}
-              style={{ height: '100%', width: '100%' }}
-              className="dark-map"
-              scrollWheelZoom={true}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                className="dark-tiles"
-              />
-              <MapClickHandler />
-              {markerPosition && (
-                <Marker
-                  position={markerPosition}
-                  draggable={true}
-                  eventHandlers={{
-                    dragend: (e) => {
-                      const marker = e.target
-                      const position = marker.getLatLng()
-                      setMarkerPosition([position.lat, position.lng])
-                      handleInputChange('lat', position.lat.toString())
-                      handleInputChange('lng', position.lng.toString())
-                    },
-                  }}
+          <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '400px', position: 'relative' }}>
+            {typeof window !== 'undefined' && (
+              <MapContainer
+                key={`map-${mapCenter[0]}-${mapCenter[1]}`}
+                center={mapCenter}
+                zoom={markerPosition ? 16 : 13}
+                style={{ height: '100%', width: '100%', zIndex: 1 }}
+                className="dark-map"
+                scrollWheelZoom={true}
+                whenCreated={(mapInstance) => {
+                  // 지도가 생성된 후 초기화 확인
+                  setTimeout(() => {
+                    mapInstance.invalidateSize()
+                  }, 100)
+                }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  className="dark-tiles"
                 />
-              )}
-            </MapContainer>
+                <MapClickHandler />
+                {markerPosition && (
+                  <Marker
+                    position={markerPosition}
+                    draggable={true}
+                    eventHandlers={{
+                      dragend: (e) => {
+                        const marker = e.target
+                        const position = marker.getLatLng()
+                        setMarkerPosition([position.lat, position.lng])
+                        handleInputChange('lat', position.lat.toString())
+                        handleInputChange('lng', position.lng.toString())
+                      },
+                    }}
+                  />
+                )}
+              </MapContainer>
+            )}
           </div>
 
           {/* Coordinate inputs */}
