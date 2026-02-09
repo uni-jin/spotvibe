@@ -500,10 +500,10 @@ export const savePlace = async (placeData, placeId = null) => {
 
     // Use SECURITY DEFINER function to bypass RLS
     const { data, error } = await supabase.rpc('admin_save_place', {
-      p_id: placeId,
       p_name: placeData.name,
-      p_name_en: placeData.name_en || null,
       p_type: placeData.type,
+      p_id: placeId,
+      p_name_en: placeData.name_en || null,
       p_thumbnail_url: placeData.thumbnail_url || null,
       p_description: placeData.description || null,
       p_lat: placeData.lat ? parseFloat(placeData.lat) : null,

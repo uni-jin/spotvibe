@@ -3,10 +3,10 @@
 
 -- Function to create or update a place (admin only)
 CREATE OR REPLACE FUNCTION admin_save_place(
-  p_id INTEGER DEFAULT NULL,
   p_name TEXT,
-  p_name_en TEXT DEFAULT NULL,
   p_type TEXT,
+  p_id INTEGER DEFAULT NULL,
+  p_name_en TEXT DEFAULT NULL,
   p_thumbnail_url TEXT DEFAULT NULL,
   p_description TEXT DEFAULT NULL,
   p_lat DECIMAL(10, 8) DEFAULT NULL,
