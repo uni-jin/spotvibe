@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import exifr from 'exifr'
@@ -1810,6 +1810,74 @@ function App() {
     })
   }
 
+  // 지도 빈 공간 클릭 핸들러 컴포넌트
+  function MapClickHandler({ onMapClick }) {
+    useMapEvents({
+      click: (e) => {
+        // 마커나 팝업이 아닌 지도 자체를 클릭했을 때만 실행
+        if (e.originalEvent && e.originalEvent.target) {
+          const target = e.originalEvent.target
+          if (
+            !target.closest('.leaflet-marker-icon') &&
+            !target.closest('.leaflet-popup') &&
+            !target.closest('.leaflet-popup-content-wrapper')
+          ) {
+            onMapClick()
+          }
+        }
+      },
+    })
+    return null
+  }
+
+  // 사용자 현재 위치 마커 컴포넌트
+  function UserLocationMarker({ location }) {
+    const map = useMap()
+    const hasCenteredRef = useRef(false)
+
+    useEffect(() => {
+      if (!location) return
+
+      // 최초 한 번만 사용자 위치로 부드럽게 이동
+      if (!hasCenteredRef.current) {
+        const target = [location.lat, location.lng]
+        try {
+          map.flyTo(target, map.getZoom() || 16, { duration: 0.8 })
+        } catch {
+          map.setView(target, map.getZoom() || 16)
+        }
+        hasCenteredRef.current = true
+      }
+    }, [location, map])
+
+    if (!location) return null
+
+    return (
+      <>
+        <CircleMarker
+          center={[location.lat, location.lng]}
+          radius={7}
+          pathOptions={{
+            color: '#3B82F6', // 파란색 테두리
+            fillColor: '#60A5FA',
+            fillOpacity: 0.9,
+            weight: 2,
+          }}
+        />
+        <CircleMarker
+          center={[location.lat, location.lng]}
+          radius={14}
+          pathOptions={{
+            color: '#3B82F6',
+            fillColor: '#3B82F6',
+            fillOpacity: 0.15,
+            weight: 1,
+          }}
+        />
+      </>
+    )
+  }
+
   // 커스텀 마커 아이콘 생성 함수
   const createCustomIcon = (imageUrl, isRecent = false, timeAgo = '') => {
     // 이미지 URL이 없으면 기본 이미지 사용
@@ -1989,6 +2057,11 @@ function App() {
                 setSelectedPin(null)
               }}
             />
+
+            {/* 사용자 현재 위치 마커 */}
+            {userLocation && (
+              <UserLocationMarker location={userLocation} />
+            )}
 
             {/* 관리자 등록 장소 마커 (카테고리 필터 적용) */}
             {hotSpots
