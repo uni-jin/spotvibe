@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import exifr from 'exifr'
@@ -1217,6 +1217,42 @@ function App() {
     return vibeOptions.find((v) => v.id === vibeId) || vibeOptions[0]
   }
 
+  // 노출 기간 포맷팅 함수 (월은 영어, 일자는 숫자)
+  const formatDisplayPeriod = (startDate, endDate) => {
+    if (!startDate && !endDate) return null
+    
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    
+    const formatDate = (dateString) => {
+      if (!dateString) return null
+      const date = new Date(dateString)
+      // UTC를 KST로 변환 (UTC+9)
+      const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+      const month = monthNames[kstDate.getMonth()]
+      const day = kstDate.getDate()
+      return { month, day }
+    }
+    
+    const start = formatDate(startDate)
+    const end = formatDate(endDate)
+    
+    if (start && end) {
+      // 같은 달이면 "Jan 15 - 20" 형식
+      if (start.month === end.month) {
+        return `${start.month} ${start.day} - ${end.day}`
+      } else {
+        // 다른 달이면 "Jan 15 - Feb 5" 형식
+        return `${start.month} ${start.day} - ${end.month} ${end.day}`
+      }
+    } else if (start) {
+      return `From ${start.month} ${start.day}`
+    } else if (end) {
+      return `Until ${end.month} ${end.day}`
+    }
+    
+    return null
+  }
+
   const handleNavClick = (viewId) => {
     if (viewId === 'feed' && !selectedRegion) {
       // 지역 선택 화면으로
@@ -1424,7 +1460,11 @@ function App() {
                       }`}
                     >
                       <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
-                      <p className="text-xs text-gray-400 mb-2">{spot.nameEn}</p>
+                      {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                        <p className="text-xs text-gray-400 mb-2">
+                          {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                        </p>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
                         <span className="text-xs text-gray-500">•</span>
@@ -1807,6 +1847,29 @@ function App() {
     })
   }
 
+  // 지도 빈 공간 클릭 핸들러 컴포넌트
+  function MapClickHandler({ onMapClick }) {
+    useMapEvents({
+      click: (e) => {
+        // 마커나 팝업이 아닌 지도 자체를 클릭했을 때만 실행
+        // Leaflet의 이벤트는 버블링되므로, 마커 클릭은 이미 처리됨
+        // 여기서는 지도 배경을 클릭한 경우만 처리
+        if (e.originalEvent && e.originalEvent.target) {
+          const target = e.originalEvent.target
+          // 마커나 팝업 요소가 아닌 경우에만 실행
+          if (
+            !target.closest('.leaflet-marker-icon') &&
+            !target.closest('.leaflet-popup') &&
+            !target.closest('.leaflet-popup-content-wrapper')
+          ) {
+            onMapClick()
+          }
+        }
+      },
+    })
+    return null
+  }
+
   // 클러스터 아이콘 생성 함수
   const createClusterIcon = (count) => {
     return L.divIcon({
@@ -1827,7 +1890,12 @@ function App() {
 
   // Map View
   if (currentView === 'map') {
-    const mapItems = clusterPosts(vibePosts, mapZoom)
+    // 선택된 카테고리에 따라 포스트 필터링 (category_type 기준)
+    const postsForMap = selectedHotSpotCategory
+      ? vibePosts.filter((post) => (post.category_type || 'other') === selectedHotSpotCategory)
+      : vibePosts
+
+    const mapItems = clusterPosts(postsForMap, mapZoom)
     // 선택한 지역이 있으면 해당 지역 중심, 없으면 성수동 기본값
     const mapCenter = selectedRegion 
       ? (selectedRegion.id === 'Seongsu' ? [37.5446, 127.0559] : [37.5446, 127.0559]) // 다른 지역 좌표는 나중에 추가
@@ -1837,16 +1905,16 @@ function App() {
       <div className="min-h-screen bg-black text-white pb-24 relative overflow-hidden">
         {/* Header */}
         <div className="absolute top-0 left-0 right-0 bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
-          <div className="px-4 py-3">
+          <div className="px-4 py-3 space-y-2">
             <div className="flex items-center justify-between">
-      <div>
+              <div>
                 <h1 className="text-xl font-bold">
                   Live Radar <span className="text-[#ADFF2F]">📡</span>
                 </h1>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {vibePosts.filter((p) => p.metadata).length} active signals
                 </p>
-      </div>
+              </div>
               {mapZoom === 2 && (
                 <button
                   onClick={() => {
@@ -1857,9 +1925,36 @@ function App() {
                   className="px-3 py-1.5 text-xs font-semibold bg-[#ADFF2F]/20 text-[#ADFF2F] rounded-lg border border-[#ADFF2F]/50 hover:bg-[#ADFF2F]/30"
                 >
                   ← Back
-        </button>
+                </button>
               )}
             </div>
+            {/* 카테고리 필터 (지도 상단) */}
+            {categories.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {categories.map((category) => {
+                  const isSelected = selectedHotSpotCategory === category.code_value
+                  return (
+                    <button
+                      key={category.code_value}
+                      onClick={() => {
+                        // 카테고리 변경 시 클러스터 상태 리셋
+                        setSelectedHotSpotCategory(category.code_value)
+                        setMapZoom(1)
+                        setSelectedCluster(null)
+                        setSelectedPin(null)
+                      }}
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        isSelected
+                          ? 'bg-[#ADFF2F] text-black'
+                          : 'bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-white'
+                      }`}
+                    >
+                      {category.code_label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1878,6 +1973,78 @@ function App() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               className="dark-tiles"
             />
+
+            {/* 지도 빈 공간 클릭 감지 컴포넌트 */}
+            <MapClickHandler
+              onMapClick={() => {
+                // 지도 빈 공간 클릭 시 클러스터 상태 리셋
+                setMapZoom(1)
+                setSelectedCluster(null)
+                setSelectedPin(null)
+              }}
+            />
+
+            {/* 관리자 등록 장소 마커 (카테고리 필터 적용) */}
+            {hotSpots
+              .filter((spot) => spot.lat && spot.lng)
+              .filter((spot) =>
+                selectedHotSpotCategory ? spot.type === selectedHotSpotCategory : true
+              )
+              .map((spot) => (
+                <Marker
+                  key={`place-${spot.id}`}
+                  position={[spot.lat, spot.lng]}
+                  // 관리자 등록 장소는 기본 아이콘 사용 (차별화: 지도 위에 항상 고정 표시)
+                >
+                  <Popup className="custom-popup">
+                    <div className="bg-gray-900 border-2 border-[#ADFF2F] rounded-lg p-4 shadow-2xl min-w-[200px]">
+                      {/* 썸네일 이미지 */}
+                      {spot.thumbnail_url && (
+                        <div className="mb-3">
+                          <img
+                            src={spot.thumbnail_url}
+                            alt={spot.name}
+                            className="w-full h-32 rounded object-cover"
+                          />
+                        </div>
+                      )}
+                      
+                      <div className="space-y-2">
+                        <div className="font-bold text-sm text-white mb-1">{spot.name}</div>
+                        {spot.type && (
+                          <div className="text-xs text-gray-400 mb-1">
+                            {spot.type === 'popup_store' && 'Pop-up Store'}
+                            {spot.type === 'restaurant' && 'Restaurant'}
+                            {spot.type === 'shop' && 'Shop'}
+                            {!['popup_store', 'restaurant', 'shop'].includes(spot.type) && spot.type}
+                          </div>
+                        )}
+                        {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                          <div className="text-xs text-[#ADFF2F] mb-1">
+                            {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                          </div>
+                        )}
+                        {spot.description && (
+                          <div className="text-xs text-gray-400 mb-2">{spot.description}</div>
+                        )}
+                      </div>
+                      
+                      {/* View Detail 버튼 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          handlePlaceClick(spot.id)
+                          setCurrentView('feed')
+                        }}
+                        className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors mt-3"
+                      >
+                        View Detail →
+                      </button>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
 
             {/* 마커 표시 */}
             {mapItems.length > 0 ? (

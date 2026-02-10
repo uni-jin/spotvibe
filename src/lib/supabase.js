@@ -176,6 +176,10 @@ export const db = {
       wait: place.wait_time,
       lat: place.lat,
       lng: place.lng,
+      thumbnail_url: place.thumbnail_url,
+      description: place.description,
+      display_start_date: place.display_start_date,
+      display_end_date: place.display_end_date,
     }))
   },
 

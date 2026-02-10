@@ -160,9 +160,10 @@ const PlacesManagement = () => {
   const formatDate = (dateString) => {
     if (!dateString) return '-'
     const date = new Date(dateString)
-    // Convert to KST (UTC+9)
-    const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-    return kstDate.toLocaleDateString('ko-KR', {
+    // Supabase stores timestamps in UTC (TIMESTAMP WITH TIME ZONE)
+    // Use toLocaleString with timeZone option for accurate KST conversion
+    return date.toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
