@@ -191,6 +191,10 @@ function App() {
           wait: place.wait || 'Quiet',
           lat: place.lat,
           lng: place.lng,
+          thumbnail_url: place.thumbnail_url,
+          description: place.description,
+          display_start_date: place.display_start_date,
+          display_end_date: place.display_end_date,
         }))
 
         // 정렬 로직
@@ -1471,8 +1475,6 @@ function App() {
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
-                        <span className="text-xs text-gray-500">•</span>
-                        <span className="text-xs text-gray-400">{spot.wait}</span>
                         {spot.distance !== undefined && (
                           <>
                             <span className="text-xs text-gray-500">•</span>
