@@ -2032,8 +2032,14 @@ function App() {
           </div>
         </div>
 
-        {/* Leaflet Map - 헤더(상단)와 BottomNav(하단)에 가리지 않도록 상하 여백 반영 */}
-        <div className="absolute inset-x-0 top-16 bottom-16">
+        {/* Leaflet Map - 헤더(약 110px)와 BottomNav(약 89px) 사이 영역을 정확히 채우도록 높이/위치 지정 */}
+        <div
+          className="absolute inset-x-0"
+          style={{
+            top: '110px',
+            height: 'calc(100vh - 110px - 89px)',
+          }}
+        >
           <MapContainer
             center={mapCenter}
             zoom={16}
