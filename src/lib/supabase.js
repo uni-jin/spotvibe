@@ -126,9 +126,9 @@ export const db = {
 
   // Get all places (filtered by display period - KST)
   async getPlaces(regionId = null) {
-    // Get current time in KST (UTC+9)
-    const now = new Date()
-    const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000))
+    // Get current time in UTC for accurate comparison
+    // All dates in database are stored in UTC
+    const nowUTC = new Date()
 
     let query = supabase
       .from('places')
@@ -147,22 +147,24 @@ export const db = {
       return []
     }
 
-    // Client-side filtering for display period (KST)
+    // Client-side filtering for display period
+    // Compare all times in UTC (database stores UTC, so we compare in UTC)
     const filtered = data.filter((place) => {
-      const start = place.display_start_date ? new Date(place.display_start_date) : null
-      const end = place.display_end_date ? new Date(place.display_end_date) : null
+      // If no display period is set, always show
+      if (!place.display_start_date && !place.display_end_date) {
+        return true
+      }
       
-      // Convert stored UTC dates to KST for comparison
-      const kstStart = start ? new Date(start.getTime() + (9 * 60 * 60 * 1000)) : null
-      const kstEnd = end ? new Date(end.getTime() + (9 * 60 * 60 * 1000)) : null
+      const startUTC = place.display_start_date ? new Date(place.display_start_date) : null
+      const endUTC = place.display_end_date ? new Date(place.display_end_date) : null
       
-      // Check if currently within display period
+      // Check if currently within display period (all in UTC)
       // Display if:
-      // - display_start_date is NULL OR display_start_date <= now (KST)
-      // - display_end_date is NULL OR display_end_date >= now (KST)
+      // - display_start_date is NULL OR display_start_date <= now (UTC)
+      // - display_end_date is NULL OR display_end_date >= now (UTC)
       const isWithinPeriod = 
-        (!kstStart || kstStart <= kstNow) && 
-        (!kstEnd || kstEnd >= kstNow)
+        (!startUTC || startUTC <= nowUTC) && 
+        (!endUTC || endUTC >= nowUTC)
       
       return isWithinPeriod
     })

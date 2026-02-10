@@ -1225,11 +1225,15 @@ function App() {
     
     const formatDate = (dateString) => {
       if (!dateString) return null
+      // UTC 문자열을 파싱 (Date 객체는 내부적으로 UTC로 저장)
       const date = new Date(dateString)
-      // UTC를 KST로 변환 (UTC+9)
-      const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-      const month = monthNames[kstDate.getMonth()]
-      const day = kstDate.getDate()
+      // UTC 기준으로 날짜 정보 추출 후 KST로 변환 (UTC+9)
+      // getUTCDate(), getUTCMonth() 등을 사용하여 UTC 기준으로 계산
+      const utcTime = date.getTime()
+      const kstTime = utcTime + (9 * 60 * 60 * 1000)
+      const kstDate = new Date(kstTime)
+      const month = monthNames[kstDate.getUTCMonth()]
+      const day = kstDate.getUTCDate()
       return { month, day }
     }
     
