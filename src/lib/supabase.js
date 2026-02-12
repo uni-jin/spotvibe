@@ -96,6 +96,7 @@ export const db = {
       placeId: post.place_id,
       placeName: post.place_name,
       vibe: post.vibe,
+      category_type: post.category_type ?? 'other',
       description: post.description || null,
       image: post.main_image_url || (post.post_images?.find(img => img.is_main)?.image_url),
       images: post.post_images
@@ -187,9 +188,9 @@ export const db = {
 
   // Create a new post
   async createPost(postData) {
-    const { placeId, placeName, vibe, description, mainImageUrl, additionalImageUrls, metadata, userId } = postData
+    const { placeId, placeName, vibe, description, mainImageUrl, additionalImageUrls, metadata, userId, categoryType } = postData
 
-    // Insert post
+    // Insert post (category_type: posts 테이블에 컬럼 필요)
     const { data: post, error: postError } = await supabase
       .from('posts')
       .insert({
@@ -199,6 +200,7 @@ export const db = {
         description: description || null,
         user_id: userId || null,
         main_image_url: mainImageUrl,
+        category_type: categoryType ?? 'other',
         metadata: {
           lat: metadata.lat,
           lng: metadata.lng,

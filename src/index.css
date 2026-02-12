@@ -58,6 +58,23 @@ body {
   animation: radar-pulse 2s ease-in-out infinite;
 }
 
+/* 사용자 현재 위치 마커 반짝임 */
+@keyframes user-location-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.user-location-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
 /* Leaflet Dark Theme */
 .dark-map .leaflet-container {
   background-color: #000;

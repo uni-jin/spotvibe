@@ -181,94 +181,112 @@ function App() {
         setPlacesError(null)
         const places = await db.getPlaces()
         
-        // places를 hotSpots 형식으로 변환
-        let formattedPlaces = places.map((place) => ({
-          id: place.id,
-          name: place.name,
-          nameEn: place.nameEn || place.name,
-          type: place.type || 'other',
-          status: place.status || '🟢 Quiet',
-          wait: place.wait || 'Quiet',
-          lat: place.lat,
-          lng: place.lng,
-          thumbnail_url: place.thumbnail_url,
-          description: place.description,
-          display_start_date: place.display_start_date,
-          display_end_date: place.display_end_date,
-        }))
+        // 장소별 포스팅 통계 (최신 Vibe 표시용) - 항상 계산
+        const vibeIdToLabel = {
+          verybusy: '🔥 Very Busy',
+          busy: '⏱️ Busy',
+          nowait: '✅ No Wait',
+          quiet: '🟢 Quiet',
+          soldout: '⚠️ Sold Out / Closed',
+        }
+        const getVibeLabel = (vibeId) => vibeIdToLabel[vibeId] || '🟢 Quiet'
+
+        const placeStats = {}
+        vibePosts.forEach((post) => {
+          const placeName = post.placeName || post.place_name
+          if (!placeName) return
+
+          if (!placeStats[placeName]) {
+            placeStats[placeName] = {
+              count: 0,
+              latestTimestamp: null,
+              latestVibe: null,
+            }
+          }
+
+          placeStats[placeName].count++
+
+          const postTime = post.timestamp
+            ? new Date(post.timestamp).getTime()
+            : (post.metadata?.capturedAt
+                ? new Date(post.metadata.capturedAt).getTime()
+                : 0)
+
+          if (
+            !placeStats[placeName].latestTimestamp ||
+            postTime > placeStats[placeName].latestTimestamp
+          ) {
+            placeStats[placeName].latestTimestamp = postTime
+            placeStats[placeName].latestVibe = post.vibe || null
+          }
+        })
+
+        // places를 hotSpots 형식으로 변환 (관리자 등록 장소의 status는 사용자 최신 Vibe로 덮어씀)
+        let formattedPlaces = places.map((place) => {
+          const stats = placeStats[place.name]
+          const displayStatus = stats?.latestVibe
+            ? getVibeLabel(stats.latestVibe)
+            : (place.status || '🟢 Quiet')
+          return {
+            id: place.id,
+            name: place.name,
+            nameEn: place.nameEn || place.name,
+            type: place.type || 'other',
+            status: displayStatus,
+            wait: place.wait || 'Quiet',
+            lat: place.lat,
+            lng: place.lng,
+            thumbnail_url: place.thumbnail_url,
+            description: place.description,
+            display_start_date: place.display_start_date,
+            display_end_date: place.display_end_date,
+          }
+        })
 
         // 정렬 로직
         if (userLocation) {
           // GPS 위치가 있을 때: 거리순 정렬
-          formattedPlaces = formattedPlaces.map((place) => {
-            if (place.lat && place.lng) {
-              const distance = calculateDistance(
-                userLocation.lat,
-                userLocation.lng,
-                place.lat,
-                place.lng
-              )
-              return { ...place, distance }
-            }
-            return place
-          }).sort((a, b) => {
-            // 거리가 있는 것부터 정렬, 그 다음 거리순
-            if (a.distance !== undefined && b.distance !== undefined) {
-              return a.distance - b.distance
-            }
-            if (a.distance !== undefined) return -1
-            if (b.distance !== undefined) return 1
-            return 0
-          })
+          formattedPlaces = formattedPlaces
+            .map((place) => {
+              if (place.lat && place.lng) {
+                const distance = calculateDistance(
+                  userLocation.lat,
+                  userLocation.lng,
+                  place.lat,
+                  place.lng
+                )
+                return { ...place, distance }
+              }
+              return place
+            })
+            .sort((a, b) => {
+              if (a.distance !== undefined && b.distance !== undefined) {
+                return a.distance - b.distance
+              }
+              if (a.distance !== undefined) return -1
+              if (b.distance !== undefined) return 1
+              return 0
+            })
         } else {
           // GPS 위치가 없을 때: 포스팅 수 → 최신 포스팅 시간 → 이름순
-          // 각 place에 대한 포스팅 통계 계산
-          const placeStats = {}
-          vibePosts.forEach((post) => {
-            const placeName = post.placeName || post.place_name
-            if (!placeName) return
-
-            if (!placeStats[placeName]) {
-              placeStats[placeName] = {
-                count: 0,
-                latestTimestamp: null,
+          formattedPlaces = formattedPlaces
+            .map((place) => {
+              const stats = placeStats[place.name] || { count: 0, latestTimestamp: 0 }
+              return {
+                ...place,
+                postCount: stats.count,
+                latestPostTime: stats.latestTimestamp,
               }
-            }
-
-            placeStats[placeName].count++
-            
-            const postTime = post.timestamp 
-              ? new Date(post.timestamp).getTime()
-              : (post.metadata?.capturedAt 
-                  ? new Date(post.metadata.capturedAt).getTime()
-                  : 0)
-            
-            if (!placeStats[placeName].latestTimestamp || 
-                postTime > placeStats[placeName].latestTimestamp) {
-              placeStats[placeName].latestTimestamp = postTime
-            }
-          })
-
-          // 정렬: 포스팅 수 (내림차순) → 최신 포스팅 시간 (내림차순) → 이름 (오름차순)
-          formattedPlaces = formattedPlaces.map((place) => {
-            const stats = placeStats[place.name] || { count: 0, latestTimestamp: 0 }
-            return {
-              ...place,
-              postCount: stats.count,
-              latestPostTime: stats.latestTimestamp,
-            }
-          }).sort((a, b) => {
-            // 1. 포스팅 수 (내림차순)
-            if (a.postCount !== b.postCount) {
-              return b.postCount - a.postCount
-            }
-            // 2. 최신 포스팅 시간 (내림차순)
-            if (a.latestPostTime !== b.latestPostTime) {
-              return (b.latestPostTime || 0) - (a.latestPostTime || 0)
-            }
-            // 3. 이름순 (오름차순)
-            return a.name.localeCompare(b.name)
-          })
+            })
+            .sort((a, b) => {
+              if (a.postCount !== b.postCount) {
+                return b.postCount - a.postCount
+              }
+              if (a.latestPostTime !== b.latestPostTime) {
+                return (b.latestPostTime || 0) - (a.latestPostTime || 0)
+              }
+              return a.name.localeCompare(b.name)
+            })
         }
 
         setHotSpots(formattedPlaces)
@@ -1072,6 +1090,7 @@ function App() {
           additionalMetadata: additionalMetadata,
         },
         userId: user?.id || null,
+        categoryType: postCategory || 'other',
       }
 
       const savedPost = await db.createPost(postData)
@@ -1129,6 +1148,7 @@ function App() {
         timestamp: new Date(savedPost.created_at),
         user: user?.id || user?.email || 'anonymous',
         userId: user?.id || null,
+        category_type: savedPost.category_type ?? postCategory ?? 'other',
         metadata: {
           lat: postMetadata.lat,
           lng: postMetadata.lng,
@@ -1583,19 +1603,20 @@ function App() {
 
                     {/* Info Section */}
                     <div className="p-3 space-y-2 flex-shrink-0">
-                      {/* Place Name */}
+                      {/* Place Name - 말줄임 처리로 모바일 이탈 방지 */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           handlePlaceClick(post.placeId)
                         }}
-                        className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors whitespace-nowrap ${
+                        className={`inline-block max-w-full min-w-0 px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors truncate ${
                           spotFilter === post.placeId
                             ? 'bg-[#ADFF2F]/30 text-[#ADFF2F] border-[#ADFF2F]'
                             : 'bg-[#ADFF2F]/20 text-[#ADFF2F] border-[#ADFF2F]/50 hover:bg-[#ADFF2F]/30'
                         }`}
+                        title={post.placeName}
                       >
-                        📍 {post.placeName}
+                        <span className="truncate block">📍 {post.placeName}</span>
                       </button>
 
                       {/* Captured Time */}
@@ -1730,9 +1751,10 @@ function App() {
   // 클러스터링 함수
   const clusterPosts = (posts, zoomLevel) => {
     if (zoomLevel === 2 && selectedCluster) {
-      // 확대된 상태: 선택된 클러스터의 개별 포스트만 반환
-      return selectedCluster.posts.map((post) => {
-        // 메인 이미지 추출 (images 배열의 첫 번째 또는 image 속성)
+      // 확대된 상태: 선택된 클러스터는 개별 마커로 펼치고, 나머지 포스트는 기존처럼 클러스터/단일로 유지
+      const selectedIds = new Set(selectedCluster.posts.map((p) => p.id))
+      const restPosts = posts.filter((p) => !selectedIds.has(p.id))
+      const expanded = selectedCluster.posts.map((post) => {
         const mainImage = post.images?.[0] || post.image
         return {
           ...post,
@@ -1741,6 +1763,8 @@ function App() {
           clusterId: selectedCluster.id,
         }
       })
+      const restItems = clusterPosts(restPosts, 1)
+      return [...expanded, ...restItems]
     }
 
     const postsWithCoords = posts.filter((post) => post.metadata)
@@ -1830,7 +1854,7 @@ function App() {
     return null
   }
 
-  // 사용자 현재 위치 마커 컴포넌트
+  // 사용자 현재 위치 마커 컴포넌트 (반짝이는 pulse 애니메이션)
   function UserLocationMarker({ location }) {
     const map = useMap()
     const hasCenteredRef = useRef(false)
@@ -1852,30 +1876,19 @@ function App() {
 
     if (!location) return null
 
-    return (
-      <>
-        <CircleMarker
-          center={[location.lat, location.lng]}
-          radius={7}
-          pathOptions={{
-            color: '#3B82F6', // 파란색 테두리
-            fillColor: '#60A5FA',
-            fillOpacity: 0.9,
-            weight: 2,
-          }}
-        />
-        <CircleMarker
-          center={[location.lat, location.lng]}
-          radius={14}
-          pathOptions={{
-            color: '#3B82F6',
-            fillColor: '#3B82F6',
-            fillOpacity: 0.15,
-            weight: 1,
-          }}
-        />
-      </>
-    )
+    const userLocIcon = L.divIcon({
+      html: `
+        <div class="user-location-marker-wrapper" style="position:relative;width:32px;height:32px;margin-left:-16px;margin-top:-16px;">
+          <div class="user-location-pulse" style="position:absolute;inset:-8px;border-radius:50%;border:2px solid #3B82F6;animation:user-location-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite;"></div>
+          <div style="position:absolute;inset:0;border-radius:50%;background:#60A5FA;border:2px solid #3B82F6;box-shadow:0 0 0 4px rgba(59,130,246,0.2);"></div>
+        </div>
+      `,
+      className: 'user-location-marker',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    })
+
+    return <Marker position={[location.lat, location.lng]} icon={userLocIcon} zIndexOffset={1000} />
   }
 
   // 커스텀 마커 아이콘 생성 함수

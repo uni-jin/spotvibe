@@ -308,13 +308,12 @@ export const getAdminPlaces = async () => {
       return []
     }
 
-    // Get recent posts for each place
+    // Get recent posts for each place (metadata 포함: 촬영 일시 기준 정렬용)
     const placeIds = places.map(p => p.id)
     const { data: posts, error: postsError } = await supabase
       .from('posts')
-      .select('id, place_id, place_name, vibe, created_at, user_id')
+      .select('id, place_id, place_name, vibe, created_at, metadata, user_id')
       .in('place_id', placeIds)
-      .order('created_at', { ascending: false })
 
     if (postsError) {
       console.error('Error fetching posts:', postsError)
@@ -325,6 +324,12 @@ export const getAdminPlaces = async () => {
         recentPostTime: null,
         postCount: 0
       }))
+    }
+
+    // 촬영 일시: metadata.capturedAt (ISO 문자열) 또는 created_at 폴백
+    const getCapturedAt = (post) => {
+      const captured = post.metadata?.capturedAt
+      return captured ? new Date(captured).getTime() : new Date(post.created_at).getTime()
     }
 
     // Group posts by place_id
@@ -355,15 +360,18 @@ export const getAdminPlaces = async () => {
       }
     }
 
-    // Combine places with post stats
+    // Combine places with post stats (최근 상태 = 촬영 일시 기준 최신 포스트의 Vibe / 촬영 일시 표시)
     return places.map(place => {
       const placePosts = postsByPlace[place.id] || []
-      const latestPost = placePosts[0] || null
-      
+      // 촬영 일시(metadata.capturedAt) 기준 내림차순 정렬 후 최신 1건 사용
+      const sortedByCaptured = [...placePosts].sort((a, b) => getCapturedAt(b) - getCapturedAt(a))
+      const latestPost = sortedByCaptured[0] || null
+      const capturedAt = latestPost?.metadata?.capturedAt || latestPost?.created_at || null
+
       return {
         ...place,
         recentVibe: latestPost?.vibe || null,
-        recentPostTime: latestPost?.created_at || null,
+        recentPostTime: capturedAt,
         postCount: placePosts.length,
         createdByUsername: place.created_by ? adminMap[place.created_by] : null
       }
