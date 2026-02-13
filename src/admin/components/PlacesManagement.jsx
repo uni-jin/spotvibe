@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
+import { getDisplayStatusKST, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
 import imageCompression from 'browser-image-compression'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-const PlacesManagement = () => {
+const PlacesManagement = ({ resetTrigger = 0 }) => {
   const [places, setPlaces] = useState([])
   const [filteredPlaces, setFilteredPlaces] = useState([])
   const [categories, setCategories] = useState([])
+  const [tagGroups, setTagGroups] = useState({ admission: [], benefit: [], amenity: [], content: [] })
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingPlace, setEditingPlace] = useState(null)
@@ -27,18 +29,35 @@ const PlacesManagement = () => {
   }, [])
 
   useEffect(() => {
+    if (resetTrigger > 0) {
+      setShowForm(false)
+      setEditingPlace(null)
+    }
+  }, [resetTrigger])
+
+  useEffect(() => {
     filterPlaces()
   }, [places, searchName, searchCategory, searchActive, searchDisplayStatus, searchDisplayStartDate, searchDisplayEndDate])
 
   const loadData = async () => {
     try {
       setIsLoading(true)
-      const [placesData, categoriesData] = await Promise.all([
+      const [placesData, categoriesData, admissionTags, benefitTags, amenityTags, contentTags] = await Promise.all([
         getAdminPlaces(),
-        getCommonCodes('place_category')
+        getCommonCodes('place_category'),
+        getCommonCodes('place_tag_admission', true),
+        getCommonCodes('place_tag_benefit', true),
+        getCommonCodes('place_tag_amenity', true),
+        getCommonCodes('place_tag_content', true),
       ])
       setPlaces(placesData)
       setCategories(categoriesData)
+      setTagGroups({
+        admission: admissionTags,
+        benefit: benefitTags,
+        amenity: amenityTags,
+        content: contentTags,
+      })
     } catch (error) {
       console.error('Error loading data:', error)
     } finally {
@@ -67,78 +86,41 @@ const PlacesManagement = () => {
       filtered = filtered.filter(place => place.is_active === isActive)
     }
 
-    // Filter by display status
+    // Filter by display status (한국 시간 기준)
     if (searchDisplayStatus) {
-      const now = new Date()
-      // Convert to KST (UTC+9)
-      const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000))
-      
       filtered = filtered.filter(place => {
-        const start = place.display_start_date ? new Date(place.display_start_date) : null
-        const end = place.display_end_date ? new Date(place.display_end_date) : null
-        
-        switch(searchDisplayStatus) {
-          case 'active': // 현재 노출 중
-            return (!start || start <= kstNow) && (!end || end >= kstNow)
-          case 'scheduled': // 노출 예정
-            return start && start > kstNow
-          case 'expired': // 노출 종료
-            return end && end < kstNow
-          case 'unlimited': // 무제한
-            return !start && !end
+        const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
+        switch (searchDisplayStatus) {
+          case 'active':
+            return status === 'active'
+          case 'scheduled':
+            return status === 'scheduled'
+          case 'expired':
+            return status === 'expired'
+          case 'unlimited':
+            return status === 'unlimited'
           default:
             return true
         }
       })
     }
 
-    // Filter by display period date range
+    // Filter by display period date range (KST 날짜 키로 기간 겹침 비교)
     if (searchDisplayStartDate || searchDisplayEndDate) {
+      const searchStartK = searchDisplayStartDate ? getKSTDateKey(new Date(searchDisplayStartDate)) : null
+      const searchEndK = searchDisplayEndDate ? getKSTDateKey(new Date(searchDisplayEndDate)) : null
       filtered = filtered.filter(place => {
         const placeStart = place.display_start_date ? new Date(place.display_start_date) : null
         const placeEnd = place.display_end_date ? new Date(place.display_end_date) : null
-        
-        // Convert search dates to KST for comparison
-        let searchStartKST = null
-        let searchEndKST = null
-        
-        if (searchDisplayStartDate) {
-          const searchStart = new Date(searchDisplayStartDate)
-          searchStartKST = new Date(searchStart.getTime() + (9 * 60 * 60 * 1000))
-          // Set to start of day
-          searchStartKST.setHours(0, 0, 0, 0)
-        }
-        
-        if (searchDisplayEndDate) {
-          const searchEnd = new Date(searchDisplayEndDate)
-          searchEndKST = new Date(searchEnd.getTime() + (9 * 60 * 60 * 1000))
-          // Set to end of day
-          searchEndKST.setHours(23, 59, 59, 999)
-        }
-        
-        // Convert place dates to KST
-        const placeStartKST = placeStart ? new Date(placeStart.getTime() + (9 * 60 * 60 * 1000)) : null
-        const placeEndKST = placeEnd ? new Date(placeEnd.getTime() + (9 * 60 * 60 * 1000)) : null
-        
-        // Check if place's display period overlaps with search period
-        // Place is included if:
-        // - Place has no start date OR place start <= search end (if search end exists)
-        // - Place has no end date OR place end >= search start (if search start exists)
-        // - If both search dates exist, place period should overlap with search period
-        
-        if (searchStartKST && searchEndKST) {
-          // Both dates provided: find places that overlap with the search period
-          const placeStartsBeforeSearchEnd = !placeStartKST || placeStartKST <= searchEndKST
-          const placeEndsAfterSearchStart = !placeEndKST || placeEndKST >= searchStartKST
+        const placeStartK = getKSTDateKey(placeStart)
+        const placeEndK = getKSTDateKey(placeEnd)
+        if (searchStartK != null && searchEndK != null) {
+          const placeStartsBeforeSearchEnd = placeStartK == null || placeStartK <= searchEndK
+          const placeEndsAfterSearchStart = placeEndK == null || placeEndK >= searchStartK
           return placeStartsBeforeSearchEnd && placeEndsAfterSearchStart
-        } else if (searchStartKST) {
-          // Only start date: find places that start on or before this date
-          return !placeStartKST || placeStartKST <= searchStartKST
-        } else if (searchEndKST) {
-          // Only end date: find places that end on or after this date
-          return !placeEndKST || placeEndKST >= searchEndKST
         }
-        
+        if (searchStartK != null) return placeStartK == null || placeStartK <= searchStartK
+        if (searchEndK != null) return placeEndK == null || placeEndK >= searchEndK
         return true
       })
     }
@@ -172,59 +154,31 @@ const PlacesManagement = () => {
     })
   }
 
+  const formatDateParts = (dateString) => {
+    if (!dateString) return null
+    const date = new Date(dateString)
+    const datePart = date.toLocaleDateString('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+    const timePart = date.toLocaleTimeString('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    return { date: datePart, time: timePart }
+  }
+
   const formatDisplayPeriod = (place) => {
     if (!place.display_start_date && !place.display_end_date) {
       return <span className="text-xs text-gray-500">무제한</span>
     }
-    
-    const now = new Date()
-    const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000))
-    const start = place.display_start_date ? new Date(place.display_start_date) : null
-    const end = place.display_end_date ? new Date(place.display_end_date) : null
-    
-    // Determine status
-    let status = 'unlimited'
-    let statusColor = 'text-gray-500'
-    if (start && end) {
-      if (start <= kstNow && end >= kstNow) {
-        status = 'active'
-        statusColor = 'text-green-400'
-      } else if (start > kstNow) {
-        status = 'scheduled'
-        statusColor = 'text-yellow-400'
-      } else {
-        status = 'expired'
-        statusColor = 'text-red-400'
-      }
-    } else if (start) {
-      if (start <= kstNow) {
-        status = 'active'
-        statusColor = 'text-green-400'
-      } else {
-        status = 'scheduled'
-        statusColor = 'text-yellow-400'
-      }
-    } else if (end) {
-      if (end >= kstNow) {
-        status = 'active'
-        statusColor = 'text-green-400'
-      } else {
-        status = 'expired'
-        statusColor = 'text-red-400'
-      }
-    }
-    
-    const formatDateOnly = (date) => {
-      const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-      return kstDate.toLocaleDateString('ko-KR', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      })
-    }
-    
-    const startStr = start ? formatDateOnly(start) : '시작일 없음'
-    const endStr = end ? formatDateOnly(end) : '종료일 없음'
+    const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
+    const statusColor = status === 'active' ? 'text-green-400' : status === 'scheduled' ? 'text-yellow-400' : status === 'expired' ? 'text-red-400' : 'text-gray-500'
+    const startStr = place.display_start_date ? formatUtcAsKstDisplay(place.display_start_date) : '시작일 없음'
+    const endStr = place.display_end_date ? formatUtcAsKstDisplay(place.display_end_date) : '종료일 없음'
     
     return (
       <div className="space-y-1">
@@ -234,8 +188,9 @@ const PlacesManagement = () => {
           {status === 'expired' && '노출 종료'}
           {status === 'unlimited' && '무제한'}
         </div>
-        <div className="text-xs text-gray-400">
-          {startStr} ~ {endStr}
+        <div className="text-xs text-gray-400 space-y-0.5">
+          <div>{startStr}</div>
+          <div>{endStr}</div>
         </div>
       </div>
     )
@@ -285,6 +240,7 @@ const PlacesManagement = () => {
         <PlaceForm
           place={editingPlace}
           categories={categories}
+          tagGroups={tagGroups}
           onClose={() => {
             setShowForm(false)
             setEditingPlace(null)
@@ -294,6 +250,7 @@ const PlacesManagement = () => {
             setEditingPlace(null)
             loadData()
           }}
+          onDeletePlace={deletePlace}
         />
       ) : (
         <>
@@ -386,23 +343,25 @@ const PlacesManagement = () => {
           {/* Places Table */}
           <div className="bg-gray-900 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full table-auto">
                 <thead className="bg-gray-800">
                   <tr>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">장소명</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">카테고리</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">최근 상태</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">포스팅 수</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">활성화</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">노출기간</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">등록일</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold">작업</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">장소명</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">카테고리</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">최근 상태</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">포스팅 수</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-28">활성화</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-48">노출기간</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">등록일</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">작업</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
                   {filteredPlaces.length > 0 ? (
                     filteredPlaces.map((place) => {
                       const category = categories.find(c => c.code_value === place.type)
+                      const recentParts = formatDateParts(place.recentPostTime)
+                      const createdParts = formatDateParts(place.created_at)
                       return (
                         <tr key={place.id} className="hover:bg-gray-800/50">
                           <td className="px-6 py-4">
@@ -411,7 +370,7 @@ const PlacesManagement = () => {
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {category?.code_label || place.type || '-'}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-4 align-top">
                             {place.recentVibe ? (
                               <span className="text-sm text-[#ADFF2F]">
                                 {getVibeLabel(place.recentVibe)}
@@ -419,18 +378,19 @@ const PlacesManagement = () => {
                             ) : (
                               <span className="text-sm text-gray-500">-</span>
                             )}
-                            {place.recentPostTime && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                {formatDate(place.recentPostTime)}
-                              </p>
+                            {recentParts && (
+                              <div className="text-xs text-gray-500 mt-1 leading-tight">
+                                <div>{recentParts.date}</div>
+                                <div>{recentParts.time}</div>
+                              </div>
                             )}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-300">
+                          <td className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap">
                             {place.postCount || 0}개
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-4 whitespace-nowrap">
                             <span
-                              className={`px-2 py-1 rounded text-xs ${
+                              className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
                                 place.is_active
                                   ? 'bg-green-500/20 text-green-400'
                                   : 'bg-gray-500/20 text-gray-400'
@@ -442,13 +402,18 @@ const PlacesManagement = () => {
                           <td className="px-6 py-4">
                             {formatDisplayPeriod(place)}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-300">
-                            {formatDate(place.created_at)}
+                          <td className="px-6 py-4 text-sm text-gray-300 align-top">
+                            {createdParts && (
+                              <div className="text-xs text-gray-300 leading-tight">
+                                <div>{createdParts.date}</div>
+                                <div>{createdParts.time}</div>
+                              </div>
+                            )}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-4 whitespace-nowrap">
                             <button
                               onClick={() => handleEdit(place)}
-                              className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm"
+                              className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm whitespace-nowrap"
                             >
                               수정
                             </button>
@@ -474,22 +439,7 @@ const PlacesManagement = () => {
 }
 
 // PlaceForm component
-const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
-  // Helper to convert UTC date to KST date string for input
-  const utcToKstDateString = (utcDateString) => {
-    if (!utcDateString) return ''
-    const date = new Date(utcDateString)
-    // Convert UTC to KST (UTC+9)
-    const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-    // Format as YYYY-MM-DDTHH:mm for datetime-local input
-    const year = kstDate.getFullYear()
-    const month = String(kstDate.getMonth() + 1).padStart(2, '0')
-    const day = String(kstDate.getDate()).padStart(2, '0')
-    const hours = String(kstDate.getHours()).padStart(2, '0')
-    const minutes = String(kstDate.getMinutes()).padStart(2, '0')
-    return `${year}-${month}-${day}T${hours}:${minutes}`
-  }
-
+const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeletePlace }) => {
   const [formData, setFormData] = useState({
     name: place?.name || '',
     type: place?.type || '',
@@ -497,13 +447,17 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
     lat: place?.lat || '',
     lng: place?.lng || '',
     is_active: place?.is_active !== undefined ? place.is_active : true,
-    display_start_date: place?.display_start_date ? utcToKstDateString(place.display_start_date) : '',
-    display_end_date: place?.display_end_date ? utcToKstDateString(place.display_end_date) : '',
+    display_start_date: place?.display_start_date ? utcToKstDateTimeString(place.display_start_date) : '',
+    display_end_date: place?.display_end_date ? utcToKstDateTimeString(place.display_end_date) : '',
     unlimited_display: !place?.display_start_date && !place?.display_end_date,
+    info_url: place?.info_url || '',
+    phone: place?.phone || '',
   })
+  const [selectedTags, setSelectedTags] = useState(Array.isArray(place?.hashtags) ? place.hashtags : [])
   const [thumbnailFile, setThumbnailFile] = useState(null)
   const [thumbnailPreview, setThumbnailPreview] = useState(place?.thumbnail_url || null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   
@@ -650,24 +604,12 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         thumbnailUrl = uploadData.publicUrl
       }
 
-      // Convert KST datetime to UTC for database
+      // 관리자가 입력한 한국 시간 그대로 DB에 저장
       let displayStartDate = null
       let displayEndDate = null
-      
       if (!formData.unlimited_display) {
-        if (formData.display_start_date) {
-          // Parse KST datetime string and convert to UTC
-          const kstDate = new Date(formData.display_start_date)
-          // Subtract 9 hours to convert KST to UTC
-          const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-          displayStartDate = utcDate.toISOString()
-        }
-        
-        if (formData.display_end_date) {
-          const kstDate = new Date(formData.display_end_date)
-          const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-          displayEndDate = utcDate.toISOString()
-        }
+        displayStartDate = kstDateTimeToDbString(formData.display_start_date) || null
+        displayEndDate = kstDateTimeToDbString(formData.display_end_date) || null
       }
 
       // Save place (name_en은 null로 설정)
@@ -678,6 +620,7 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
           thumbnail_url: thumbnailUrl,
           display_start_date: displayStartDate,
           display_end_date: displayEndDate,
+          hashtags: selectedTags,
         },
         place?.id || null
       )
@@ -849,18 +792,162 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
           </div>
         </div>
 
-        {/* Description */}
-        <div>
-          <label className="block text-sm font-medium mb-2 text-gray-300">
-            설명 <span className="text-gray-500 text-xs">(선택)</span>
-          </label>
-          <textarea
-            value={formData.description}
-            onChange={(e) => handleInputChange('description', e.target.value)}
-            rows={4}
-            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
-            placeholder="장소에 대한 설명을 입력하세요..."
-          />
+        {/* Description & Links */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              설명 <span className="text-gray-500 text-xs">(선택)</span>
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => handleInputChange('description', e.target.value)}
+              rows={4}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
+              placeholder="장소에 대한 설명을 입력하세요..."
+            />
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                Info URL <span className="text-gray-500 text-xs">(선택, 새 탭에서 열림)</span>
+              </label>
+              <input
+                type="url"
+                value={formData.info_url}
+                onChange={(e) => handleInputChange('info_url', e.target.value)}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                placeholder="https://example.com/info"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                전화번호 <span className="text-gray-500 text-xs">(선택)</span>
+              </label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => handleInputChange('phone', e.target.value)}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                placeholder="예: 02-123-4567"
+              />
+            </div>
+            {/* Tags from common codes */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                Tags <span className="text-gray-500 text-xs">(선택)</span>
+              </label>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1 text-xs">
+                {tagGroups?.admission?.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-gray-400 mb-1">Admission</p>
+                    <div className="flex flex-wrap gap-2">
+                      {tagGroups.admission.map((tag) => (
+                        <label
+                          key={tag.code_value}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-800/60 text-gray-200 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-3 h-3 rounded bg-gray-900 border-gray-600 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+                            checked={selectedTags.includes(tag.code_value)}
+                            onChange={(e) => {
+                              setSelectedTags((prev) =>
+                                e.target.checked
+                                  ? [...prev, tag.code_value]
+                                  : prev.filter((v) => v !== tag.code_value)
+                              )
+                            }}
+                          />
+                          <span>{tag.code_label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {tagGroups?.benefit?.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-gray-400 mb-1">Benefits</p>
+                    <div className="flex flex-wrap gap-2">
+                      {tagGroups.benefit.map((tag) => (
+                        <label
+                          key={tag.code_value}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-800/60 text-gray-200 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-3 h-3 rounded bg-gray-900 border-gray-600 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+                            checked={selectedTags.includes(tag.code_value)}
+                            onChange={(e) => {
+                              setSelectedTags((prev) =>
+                                e.target.checked
+                                  ? [...prev, tag.code_value]
+                                  : prev.filter((v) => v !== tag.code_value)
+                              )
+                            }}
+                          />
+                          <span>{tag.code_label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {tagGroups?.amenity?.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-gray-400 mb-1">Amenities</p>
+                    <div className="flex flex-wrap gap-2">
+                      {tagGroups.amenity.map((tag) => (
+                        <label
+                          key={tag.code_value}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-800/60 text-gray-200 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-3 h-3 rounded bg-gray-900 border-gray-600 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+                            checked={selectedTags.includes(tag.code_value)}
+                            onChange={(e) => {
+                              setSelectedTags((prev) =>
+                                e.target.checked
+                                  ? [...prev, tag.code_value]
+                                  : prev.filter((v) => v !== tag.code_value)
+                              )
+                            }}
+                          />
+                          <span>{tag.code_label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {tagGroups?.content?.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-gray-400 mb-1">Content</p>
+                    <div className="flex flex-wrap gap-2">
+                      {tagGroups.content.map((tag) => (
+                        <label
+                          key={tag.code_value}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-800/60 text-gray-200 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-3 h-3 rounded bg-gray-900 border-gray-600 text-[#ADFF2F] focus:ring-[#ADFF2F]"
+                            checked={selectedTags.includes(tag.code_value)}
+                            onChange={(e) => {
+                              setSelectedTags((prev) =>
+                                e.target.checked
+                                  ? [...prev, tag.code_value]
+                                  : prev.filter((v) => v !== tag.code_value)
+                              )
+                            }}
+                          />
+                          <span>{tag.code_label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Display Period */}
@@ -936,22 +1023,46 @@ const PlaceForm = ({ place, categories, onClose, onSuccess }) => {
         )}
 
         {/* Actions */}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white transition-colors"
-            disabled={isUploading}
-          >
-            취소
-          </button>
-          <button
-            type="submit"
-            className="flex-1 px-4 py-2 bg-[#ADFF2F] hover:bg-[#ADFF2F]/90 text-black font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isUploading}
-          >
-            {isUploading ? '저장 중...' : place ? '수정' : '등록'}
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white transition-colors"
+              disabled={isUploading || isDeleting}
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-[#ADFF2F] hover:bg-[#ADFF2F]/90 text-black font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isUploading || isDeleting}
+            >
+              {isUploading ? '저장 중...' : place ? '수정' : '등록'}
+            </button>
+          </div>
+          {place?.id && onDeletePlace && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm('이 장소를 삭제하시겠습니까?')) return
+                setIsDeleting(true)
+                setError('')
+                const result = await onDeletePlace(place.id)
+                if (result.success) {
+                  setSuccess('장소가 삭제되었습니다.')
+                  setTimeout(() => onSuccess(), 500)
+                } else {
+                  setError(result.error || '삭제에 실패했습니다.')
+                }
+                setIsDeleting(false)
+              }}
+              className="w-full px-4 py-2 bg-red-900/80 hover:bg-red-900 text-red-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isUploading || isDeleting}
+            >
+              {isDeleting ? '삭제 중...' : '삭제'}
+            </button>
+          )}
         </div>
       </form>
     </div>

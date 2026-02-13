@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getDisplayStatusKST } from './kstDateUtils.js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -125,12 +126,8 @@ export const db = {
     }))
   },
 
-  // Get all places (filtered by display period - KST)
+  // Get all places (filtered by display period - KST, with display status)
   async getPlaces(regionId = null) {
-    // Get current time in UTC for accurate comparison
-    // All dates in database are stored in UTC
-    const nowUTC = new Date()
-
     let query = supabase
       .from('places')
       .select('*')
@@ -148,29 +145,21 @@ export const db = {
       return []
     }
 
-    // Client-side filtering for display period
-    // Compare all times in UTC (database stores UTC, so we compare in UTC)
-    const filtered = data.filter((place) => {
-      // If no display period is set, always show
-      if (!place.display_start_date && !place.display_end_date) {
-        return true
-      }
-      
-      const startUTC = place.display_start_date ? new Date(place.display_start_date) : null
-      const endUTC = place.display_end_date ? new Date(place.display_end_date) : null
-      
-      // Check if currently within display period (all in UTC)
-      // Display if:
-      // - display_start_date is NULL OR display_start_date <= now (UTC)
-      // - display_end_date is NULL OR display_end_date >= now (UTC)
-      const isWithinPeriod = 
-        (!startUTC || startUTC <= nowUTC) && 
-        (!endUTC || endUTC >= nowUTC)
-      
-      return isWithinPeriod
+    // Client-side filtering for display period (저장된 한국 시간 기준)
+    const withStatus = data.map((place) => {
+      const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
+      return { place, displayStatus: status }
     })
 
-    return filtered.map((place) => ({
+    // Hot Spots Now에는 진행중/시작 예정(및 무제한)만 노출, 종료는 제외
+    const filtered = withStatus.filter(
+      (item) =>
+        item.displayStatus === 'active' ||
+        item.displayStatus === 'scheduled' ||
+        item.displayStatus === 'unlimited'
+    )
+
+    return filtered.map(({ place, displayStatus }) => ({
       id: place.id,
       name: place.name,
       nameEn: place.name_en,
@@ -183,6 +172,10 @@ export const db = {
       description: place.description,
       display_start_date: place.display_start_date,
       display_end_date: place.display_end_date,
+      info_url: place.info_url,
+      phone: place.phone,
+      hashtags: place.hashtags || [],
+      displayStatus,
     }))
   },
 

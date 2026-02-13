@@ -11,6 +11,7 @@ const AdminDashboard = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentMenu, setCurrentMenu] = useState('places')
   const [admin, setAdmin] = useState(null)
+  const [menuResetTrigger, setMenuResetTrigger] = useState(0)
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -44,6 +45,14 @@ const AdminDashboard = () => {
     setAdmin(null)
   }
 
+  const handleMenuChange = (menuId) => {
+    if (menuId === currentMenu) {
+      setMenuResetTrigger((t) => t + 1)
+    } else {
+      setCurrentMenu(menuId)
+    }
+  }
+
   if (!isAuthenticated) {
     return <AdminLogin onLoginSuccess={handleLoginSuccess} />
   }
@@ -51,22 +60,22 @@ const AdminDashboard = () => {
   const renderContent = () => {
     switch (currentMenu) {
       case 'users':
-        return <UsersManagement />
+        return <UsersManagement resetTrigger={menuResetTrigger} />
       case 'places':
-        return <PlacesManagement />
+        return <PlacesManagement resetTrigger={menuResetTrigger} />
       case 'custom-places':
-        return <CustomPlacesManagement />
+        return <CustomPlacesManagement resetTrigger={menuResetTrigger} />
       case 'settings':
-        return <SettingsManagement />
+        return <SettingsManagement resetTrigger={menuResetTrigger} />
       default:
-        return <PlacesManagement />
+        return <PlacesManagement resetTrigger={menuResetTrigger} />
     }
   }
 
   return (
     <AdminLayout
       currentMenu={currentMenu}
-      onMenuChange={setCurrentMenu}
+      onMenuChange={handleMenuChange}
       onLogout={handleLogout}
     >
       {renderContent()}

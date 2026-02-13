@@ -49,6 +49,24 @@ Storage도 Row Level Security를 사용하므로 정책을 설정해야 합니�
    ```
 6. **Review** 클릭 후 **Save policy**
 
+### 2.3-1 관리자 장소 썸네일 업로드 (anon 허용)
+
+관리자 사이트는 Supabase Auth가 아닌 자체 JWT로 로그인하므로, 장소 썸네일 업로드 시 anon으로 요청됩니다.  
+`post-images` 버킷의 **경로가 `places/` 로 시작하는 경우에만** anon이 INSERT 할 수 있도록 정책을 추가합니다.
+
+1. **New Policy** 클릭
+2. **For full customization** 선택
+3. Policy 이름: `Allow anon upload to places folder`
+4. Allowed operation: `INSERT`
+5. Target roles: **anon**
+6. Policy definition:
+   ```sql
+   (bucket_id = 'post-images' AND (storage.foldername(name))[1] = 'places')
+   ```
+7. **Review** 클릭 후 **Save policy**
+
+(또는 마이그레이션 `020_storage_allow_places_upload.sql` 적용으로 동일 정책 추가 가능)
+
 ### 2.4 Authenticated Update Policy 생성 (선택사항)
 
 이미지 업데이트가 필요한 경우:

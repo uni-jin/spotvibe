@@ -5,6 +5,7 @@
 import { supabase } from './supabase'
 import bcrypt from 'bcryptjs'
 import * as jose from 'jose'
+import { kstDateTimeToDbString } from './kstDateUtils.js'
 
 // JWT Secret - In production, this should be stored securely
 // For now, using a default secret (should be changed in production)
@@ -293,7 +294,7 @@ export const deleteCommonCode = async (codeId) => {
  */
 export const getAdminPlaces = async () => {
   try {
-    // Get all places
+    // Get all places (등록일 최신순)
     const { data: places, error: placesError } = await supabase
       .from('places')
       .select('*')
@@ -435,21 +436,9 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
       return { success: false, error: 'Custom place not found' }
     }
 
-    // Convert Korean time to UTC for database
-    let displayStartDate = null
-    let displayEndDate = null
-    
-    if (placeData.display_start_date) {
-      const kstDate = new Date(placeData.display_start_date)
-      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-      displayStartDate = utcDate.toISOString()
-    }
-    
-    if (placeData.display_end_date) {
-      const kstDate = new Date(placeData.display_end_date)
-      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-      displayEndDate = utcDate.toISOString()
-    }
+    // 관리자가 입력한 한국 시간 그대로 DB에 저장
+    let displayStartDate = kstDateTimeToDbString(placeData.display_start_date) || null
+    let displayEndDate = kstDateTimeToDbString(placeData.display_end_date) || null
 
     // Create official place using admin function
     const { data: newPlaceData, error: placeError } = await supabase.rpc('admin_save_place', {
@@ -523,24 +512,9 @@ export const savePlace = async (placeData, placeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    // Convert KST datetime to UTC for database
-    // datetime-local input provides date in local timezone, but we treat it as KST
-    let displayStartDate = null
-    let displayEndDate = null
-    
-    if (placeData.display_start_date) {
-      // Parse KST datetime string and convert to UTC
-      const kstDate = new Date(placeData.display_start_date)
-      // Subtract 9 hours to convert KST to UTC
-      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-      displayStartDate = utcDate.toISOString()
-    }
-    
-    if (placeData.display_end_date) {
-      const kstDate = new Date(placeData.display_end_date)
-      const utcDate = new Date(kstDate.getTime() - (9 * 60 * 60 * 1000))
-      displayEndDate = utcDate.toISOString()
-    }
+    // 관리자가 입력한 한국 시간 그대로 DB에 저장
+    let displayStartDate = kstDateTimeToDbString(placeData.display_start_date) || null
+    let displayEndDate = kstDateTimeToDbString(placeData.display_end_date) || null
 
     // Use SECURITY DEFINER function to bypass RLS
     const { data, error } = await supabase.rpc('admin_save_place', {
@@ -555,7 +529,7 @@ export const savePlace = async (placeData, placeId = null) => {
       p_is_active: placeData.is_active !== undefined ? placeData.is_active : true,
       p_region_id: placeData.region_id || null,
       p_display_start_date: displayStartDate,
-      p_display_end_date: displayEndDate
+      p_display_end_date: displayEndDate,
     })
 
     if (error) {
@@ -565,6 +539,33 @@ export const savePlace = async (placeData, placeId = null) => {
 
     // RPC returns array, get first element
     const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+
+    // Update extra fields (info_url, phone, hashtags) directly on places table
+    const extraPayload = {
+      info_url: placeData.info_url || null,
+      phone: placeData.phone || null,
+    }
+    if (placeData.hashtags) {
+      if (Array.isArray(placeData.hashtags)) {
+        extraPayload.hashtags = placeData.hashtags
+      } else if (typeof placeData.hashtags === 'string') {
+        const tags = placeData.hashtags
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        extraPayload.hashtags = tags.length > 0 ? tags : null
+      }
+    }
+
+    if (Object.values(extraPayload).some((v) => v !== undefined)) {
+      const placeIdToUpdate = result?.id || placeId
+      if (placeIdToUpdate) {
+        await supabase
+          .from('places')
+          .update(extraPayload)
+          .eq('id', placeIdToUpdate)
+      }
+    }
 
     return { success: true, data: result }
   } catch (error) {

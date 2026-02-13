@@ -9,6 +9,7 @@ import Masonry from 'react-masonry-css'
 import { auth, db, supabase } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 import { getCommonCodes, getCustomPlaceNames } from './lib/admin'
+import { formatUtcAsKstDisplay, getTodayKSTDateKey, getKstDateKeyFromString, getCalendarDaysBetweenKeys } from './lib/kstDateUtils.js'
 
 function App() {
   const location = useLocation()
@@ -102,7 +103,7 @@ function App() {
             setSelectedPost(null)
             setCurrentView('feed')
           }
-        } else if (view === 'feed' || view === 'map' || view === 'quest' || view === 'my') {
+        } else if (view === 'feed' || view === 'discover' || view === 'map' || view === 'my') {
           // 다른 뷰로 복원
           setSelectedPost(null)
           setCurrentView(view)
@@ -221,10 +222,12 @@ function App() {
           }
         })
 
-        // places를 hotSpots 형식으로 변환 (관리자 등록 장소의 status는 사용자 최신 Vibe로 덮어씀)
+        // places를 hotSpots 형식으로 변환
+        // - status: 사용자 최신 Vibe 라벨
+        // - displayStatus: Supabase에서 계산된 노출 상태(active/scheduled/unlimited 등)
         let formattedPlaces = places.map((place) => {
           const stats = placeStats[place.name]
-          const displayStatus = stats?.latestVibe
+          const vibeLabel = stats?.latestVibe
             ? getVibeLabel(stats.latestVibe)
             : (place.status || '🟢 Quiet')
           return {
@@ -232,7 +235,7 @@ function App() {
             name: place.name,
             nameEn: place.nameEn || place.name,
             type: place.type || 'other',
-            status: displayStatus,
+            status: vibeLabel,
             wait: place.wait || 'Quiet',
             lat: place.lat,
             lng: place.lng,
@@ -240,6 +243,7 @@ function App() {
             description: place.description,
             display_start_date: place.display_start_date,
             display_end_date: place.display_end_date,
+            displayStatus: place.displayStatus || 'active',
           }
         })
 
@@ -548,7 +552,7 @@ function App() {
   const handleRegionClick = (region) => {
     if (region.active) {
       setSelectedRegion(region)
-      setCurrentView('feed')
+      setCurrentView('discover') // 최초 진입 시 Discover 화면으로
       // localStorage에 저장 (새로고침 시 복원용)
       localStorage.setItem('selectedRegionId', region.id)
     } else {
@@ -607,7 +611,9 @@ function App() {
       forceScrollToTop()
     })
     
-    // 상태 변경 (이 시점에 스크롤은 이미 0으로 초기화됨)
+    const fromView = currentView
+    setViewBeforePostDetail(fromView)
+    viewBeforePostDetailRef.current = fromView
     setSelectedPost(originalPost)
     setCurrentView('post-detail')
     
@@ -634,47 +640,43 @@ function App() {
   }
   
   const handleClosePostDetail = () => {
-    // 브라우저 히스토리에 이전 뷰 추가
-    const previousView = currentView === 'post-detail' ? 'feed' : currentView
+    const previousView = viewBeforePostDetail || viewBeforePostDetailRef.current || 'feed'
     window.history.pushState({ view: previousView }, '', previousView === 'feed' ? '#feed' : '#')
     setSelectedPost(null)
+    setViewBeforePostDetail(null)
+    viewBeforePostDetailRef.current = null
     setCurrentView(previousView)
   }
   
-  // 브라우저 뒤로가기 처리
+  // 브라우저 뒤로가기 처리 (포스트 상세에서 뒤로가기 시 진입 전 뷰로 복귀)
   useEffect(() => {
     const handlePopState = (event) => {
       if (event.state) {
         const { view, postId } = event.state
         if (view === 'post-detail' && postId) {
-          // 포스트 상세 화면으로 복원
           const post = vibePosts.find(p => p.id === postId)
           if (post) {
             setSelectedPost(post)
             setCurrentView('post-detail')
           }
         } else if (view === 'feed' || view === 'map' || view === 'quest' || view === 'my') {
-          // 다른 뷰로 복원
           setSelectedPost(null)
           setCurrentView(view)
+        } else {
+          setSelectedPost(null)
+          setCurrentView(viewBeforePostDetailRef.current || 'feed')
         }
       } else {
-        // 히스토리 상태가 없으면 Feed로 이동
         setSelectedPost(null)
-        setCurrentView('feed')
+        setCurrentView(viewBeforePostDetailRef.current || 'feed')
       }
     }
 
     window.addEventListener('popstate', handlePopState)
-    
-    // 초기 히스토리 상태 설정
     if (!window.history.state) {
       window.history.replaceState({ view: currentView }, '', '#')
     }
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [currentView, vibePosts])
 
   // 좋아요 토글 함수
@@ -1241,48 +1243,26 @@ function App() {
     return vibeOptions.find((v) => v.id === vibeId) || vibeOptions[0]
   }
 
-  // 노출 기간 포맷팅 함수 (월은 영어, 일자는 숫자)
+  // 노출 기간: 관리자가 등록한 일시(KST) 그대로 표시
   const formatDisplayPeriod = (startDate, endDate) => {
     if (!startDate && !endDate) return null
-    
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    
-    const formatDate = (dateString) => {
-      if (!dateString) return null
-      // UTC 문자열을 파싱 (Date 객체는 내부적으로 UTC로 저장)
-      const date = new Date(dateString)
-      // UTC 기준으로 날짜 정보 추출 후 KST로 변환 (UTC+9)
-      // getUTCDate(), getUTCMonth() 등을 사용하여 UTC 기준으로 계산
-      const utcTime = date.getTime()
-      const kstTime = utcTime + (9 * 60 * 60 * 1000)
-      const kstDate = new Date(kstTime)
-      const month = monthNames[kstDate.getUTCMonth()]
-      const day = kstDate.getUTCDate()
-      return { month, day }
-    }
-    
-    const start = formatDate(startDate)
-    const end = formatDate(endDate)
-    
-    if (start && end) {
-      // 같은 달이면 "Jan 15 - 20" 형식
-      if (start.month === end.month) {
-        return `${start.month} ${start.day} - ${end.day}`
-      } else {
-        // 다른 달이면 "Jan 15 - Feb 5" 형식
-        return `${start.month} ${start.day} - ${end.month} ${end.day}`
-      }
-    } else if (start) {
-      return `From ${start.month} ${start.day}`
-    } else if (end) {
-      return `Until ${end.month} ${end.day}`
-    }
-    
+    const startStr = startDate ? formatUtcAsKstDisplay(startDate) : null
+    const endStr = endDate ? formatUtcAsKstDisplay(endDate) : null
+    if (startStr && endStr) return `${startStr} ~ ${endStr}`
+    if (startStr) return `${startStr} ~`
+    if (endStr) return `~ ${endStr}`
     return null
   }
 
+  // Discover 정렬 상태 / 상세 선택
+  const [discoverSort, setDiscoverSort] = useState('distance') // 'distance' | 'latest' | 'hot'
+  const [selectedDiscoverSpot, setSelectedDiscoverSpot] = useState(null)
+  const [discoverDetailFrom, setDiscoverDetailFrom] = useState(null) // 'discover' | 'home' — 장소 상세 진입 경로
+  const [viewBeforePostDetail, setViewBeforePostDetail] = useState(null) // 포스트 상세 진입 전 뷰 (뒤로가기용)
+  const viewBeforePostDetailRef = useRef(null)
+
   const handleNavClick = (viewId) => {
-    if (viewId === 'feed' && !selectedRegion) {
+    if ((viewId === 'feed' || viewId === 'discover' || viewId === 'map') && !selectedRegion) {
       // 지역 선택 화면으로
       setCurrentView('home')
     } else {
@@ -1353,6 +1333,499 @@ function App() {
             </div>
           ))}
         </div>
+      </div>
+    )
+  }
+
+  // Discover View - 관리자 등록 팝업 전용
+  if (currentView === 'discover') {
+    if (!selectedRegion) {
+      return (
+        <div className="min-h-screen bg-black text-white pb-24">
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <p className="text-gray-400">Loading...</p>
+            </div>
+          </div>
+          <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+        </div>
+      )
+    }
+
+    // popup_store 타입만 대상
+    const popupSpots = hotSpots.filter((spot) => spot.type === 'popup_store')
+
+    // 장소별 통계 (Latest/Hot 정렬용) - placeId가 없을 수 있어 name 기준
+    const statsByPlaceName = {}
+    vibePosts.forEach((post) => {
+      const placeName = post.placeName || post.place_name
+      if (!placeName) return
+      if (!statsByPlaceName[placeName]) {
+        statsByPlaceName[placeName] = { count: 0, latestTimestamp: 0 }
+      }
+      statsByPlaceName[placeName].count += 1
+      const ts = post.metadata?.capturedAt
+        ? new Date(post.metadata.capturedAt).getTime()
+        : (post.timestamp ? new Date(post.timestamp).getTime() : 0)
+      if (ts > statsByPlaceName[placeName].latestTimestamp) {
+        statsByPlaceName[placeName].latestTimestamp = ts
+      }
+    })
+
+    // 정렬 적용
+    const sortedSpots = [...popupSpots].sort((a, b) => {
+      if (discoverSort === 'distance') {
+        const da = a.distance ?? Number.MAX_VALUE
+        const db = b.distance ?? Number.MAX_VALUE
+        return da - db
+      }
+      const sa = statsByPlaceName[a.name] || { count: 0, latestTimestamp: 0 }
+      const sb = statsByPlaceName[b.name] || { count: 0, latestTimestamp: 0 }
+      if (discoverSort === 'latest') {
+        return (sb.latestTimestamp || 0) - (sa.latestTimestamp || 0)
+      }
+      // hot: count 기준
+      return (sb.count || 0) - (sa.count || 0)
+    })
+
+    const now = new Date()
+
+    const renderDDayBadge = (spot) => {
+      const start = spot.display_start_date ? new Date(spot.display_start_date) : null
+      const end = spot.display_end_date ? new Date(spot.display_end_date) : null
+      if (!start && !end) return null
+
+      const todayKey = getTodayKSTDateKey()
+      const startKey = getKstDateKeyFromString(spot.display_start_date)
+      const endKey = getKstDateKeyFromString(spot.display_end_date)
+      const startDiffDays = startKey != null ? getCalendarDaysBetweenKeys(todayKey, startKey) : null
+      const endDiffDays = endKey != null ? getCalendarDaysBetweenKeys(todayKey, endKey) : null
+
+      // 시작 전: D-n 형식 (한국 시간 날짜 기준)
+      if (start && now < start) {
+        if (startDiffDays !== null && startDiffDays > 0) return `D-${startDiffDays}`
+        return 'D-0'
+      }
+
+      // 진행 중: 종료까지 남은 기간 (한국 시간 날짜 기준 — 오늘/내일 구분)
+      if (start && (!end || now <= end)) {
+        if (endDiffDays === null) return 'On now'
+        if (endDiffDays > 1) return `${endDiffDays} days left`
+        if (endDiffDays === 1) return 'Ends tomorrow'
+        if (endDiffDays === 0) return 'Ends today'
+        return 'On now'
+      }
+
+      return null
+    }
+
+    const getFreshVibeLabel = (spot) => {
+      // 해당 장소에 대한 최신 포스트 찾기
+      const postsForPlace = vibePosts.filter(
+        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+      )
+      if (postsForPlace.length === 0) return null
+      const latest = postsForPlace.reduce((acc, cur) => {
+        const t = cur.metadata?.capturedAt
+          ? new Date(cur.metadata.capturedAt).getTime()
+          : (cur.timestamp ? new Date(cur.timestamp).getTime() : 0)
+        const accT = acc.metadata?.capturedAt
+          ? new Date(acc.metadata.capturedAt).getTime()
+          : (acc.timestamp ? new Date(acc.timestamp).getTime() : 0)
+        return t > accT ? cur : acc
+      })
+      const capturedAt = latest.metadata?.capturedAt
+        ? new Date(latest.metadata.capturedAt)
+        : (latest.timestamp ? new Date(latest.timestamp) : null)
+      if (!capturedAt) return null
+      const diffMinutes = (now.getTime() - capturedAt.getTime()) / (1000 * 60)
+      if (diffMinutes > 30) return null // 30분 넘으면 혼잡도 숨김
+      const vibeInfo = getVibeInfo(latest.vibe)
+      return {
+        label: vibeInfo.label,
+        isLive: diffMinutes <= 10,
+      }
+    }
+
+    return (
+      <div className="min-h-screen bg-black text-white pb-24">
+        {/* Header */}
+        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
+          <div className="max-w-6xl mx-auto px-4 py-4">
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-2xl font-bold">
+                Discover <span className="text-[#ADFF2F]">✨</span>
+              </h1>
+            </div>
+
+            {/* Sort Tabs */}
+            <div className="flex gap-2 mt-2">
+              {['distance', 'latest', 'hot'].map((key) => {
+                const label =
+                  key === 'distance' ? 'Distance'
+                  : key === 'latest' ? 'Latest'
+                  : 'Hot'
+                const isActive = discoverSort === key
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setDiscoverSort(key)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                      isActive
+                        ? 'bg-[#ADFF2F] text-black border-[#ADFF2F]'
+                        : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Cards - 1열 리스트 */}
+        <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+          {sortedSpots.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">
+              No pop-up stores available.
+            </p>
+          ) : (
+            sortedSpots.map((spot) => {
+              const dday = renderDDayBadge(spot)
+              const vibeFresh = getFreshVibeLabel(spot)
+              return (
+                <div
+                  key={spot.id}
+                  onClick={() => {
+                    setSelectedDiscoverSpot(spot)
+                    setDiscoverDetailFrom('discover')
+                    setCurrentView('discover-detail')
+                  }}
+                  className="cursor-pointer overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60 hover:border-[#ADFF2F]/60 transition-all"
+                >
+                  <div className="relative h-56 w-full overflow-hidden">
+                    {spot.thumbnail_url ? (
+                      <img
+                        src={spot.thumbnail_url}
+                        alt={spot.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                        No image
+                      </div>
+                    )}
+                    {/* Gradient */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+                    {/* D-Day badge */}
+                    {dday && (
+                      <div className="absolute top-3 left-3">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
+                          {dday}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Vibe badge (fresh only) */}
+                    {vibeFresh && (
+                      <div className="absolute top-3 right-3">
+                        <div className="px-2.5 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60 flex items-center gap-1">
+                          <span>{vibeFresh.label}</span>
+                          {vibeFresh.isLive && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bottom text over image */}
+                    <div className="absolute bottom-3 left-3 right-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{spot.name}</p>
+                          {spot.distance !== undefined && (
+                            <p className="text-[11px] text-gray-300 mt-0.5">
+                              {formatDistance(spot.distance)} away
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Info area under image */}
+                  <div className="px-4 py-3 space-y-1.5">
+                    {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                      <p className="text-xs text-gray-400">
+                        {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                      </p>
+                    )}
+                    {/* Hashtags */}
+                    {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {spot.hashtags.slice(0, 4).map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+      </div>
+    )
+  }
+
+  // Discover Detail View - Hotspot 상세
+  if (currentView === 'discover-detail') {
+    if (!selectedDiscoverSpot) {
+      // 선택된 스팟이 없으면 Discover로 되돌리기
+      setCurrentView('discover')
+      return null
+    }
+
+    const spot = selectedDiscoverSpot
+    const now = new Date()
+
+    const start = spot.display_start_date ? new Date(spot.display_start_date) : null
+    const end = spot.display_end_date ? new Date(spot.display_end_date) : null
+    const dday = (() => {
+      if (!start && !end) return null
+      const todayKey = getTodayKSTDateKey()
+      const startKey = getKstDateKeyFromString(spot.display_start_date)
+      const endKey = getKstDateKeyFromString(spot.display_end_date)
+      const startDiffDays = startKey != null ? getCalendarDaysBetweenKeys(todayKey, startKey) : null
+      const endDiffDays = endKey != null ? getCalendarDaysBetweenKeys(todayKey, endKey) : null
+      if (start && now < start) {
+        if (startDiffDays !== null && startDiffDays > 0) return `D-${startDiffDays}`
+        return 'D-0'
+      }
+      if (start && (!end || now <= end)) {
+        if (endDiffDays === null) return 'On now'
+        if (endDiffDays > 1) return `${endDiffDays} days left`
+        if (endDiffDays === 1) return 'Ends tomorrow'
+        if (endDiffDays === 0) return 'Ends today'
+        return 'On now'
+      }
+      return null
+    })()
+
+    const vibeFresh = (() => {
+      const postsForPlace = vibePosts.filter(
+        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+      )
+      if (postsForPlace.length === 0) return null
+      const latest = postsForPlace.reduce((acc, cur) => {
+        const t = cur.metadata?.capturedAt
+          ? new Date(cur.metadata.capturedAt).getTime()
+          : (cur.timestamp ? new Date(cur.timestamp).getTime() : 0)
+        const accT = acc.metadata?.capturedAt
+          ? new Date(acc.metadata.capturedAt).getTime()
+          : (acc.timestamp ? new Date(acc.timestamp).getTime() : 0)
+        return t > accT ? cur : acc
+      })
+      const capturedAt = latest.metadata?.capturedAt
+        ? new Date(latest.metadata.capturedAt)
+        : (latest.timestamp ? new Date(latest.timestamp) : null)
+      if (!capturedAt) return null
+      const diffMinutes = (now.getTime() - capturedAt.getTime()) / (1000 * 60)
+      if (diffMinutes > 30) return null
+      const vibeInfo = getVibeInfo(latest.vibe)
+      return {
+        label: vibeInfo.label,
+        isLive: diffMinutes <= 10,
+      }
+    })()
+
+    const handleBack = () => {
+      setSelectedDiscoverSpot(null)
+      setDiscoverDetailFrom(null)
+      setCurrentView(discoverDetailFrom === 'home' ? 'map' : 'discover')
+    }
+
+    const getPostTime = (p) => {
+      const t = p.metadata?.capturedAt ? new Date(p.metadata.capturedAt).getTime() : (p.timestamp ? new Date(p.timestamp).getTime() : 0)
+      return t
+    }
+
+    // 해당 장소의 포스트: 최신 포스팅 순, 최대 10개
+    const communityPosts = vibePosts
+      .filter(
+        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+      )
+      .sort((a, b) => getPostTime(b) - getPostTime(a))
+      .slice(0, 10)
+
+    return (
+      <div className="min-h-screen bg-black text-white pb-24">
+        {/* Header */}
+        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <button
+              onClick={handleBack}
+              className="text-sm text-gray-400 hover:text-[#ADFF2F] flex items-center gap-1"
+            >
+              <span>←</span>
+              <span>{discoverDetailFrom === 'home' ? 'Back to Map' : 'Back to Discover'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Hero */}
+        <div className="max-w-6xl mx-auto px-4 pt-4">
+          <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60">
+            <div className="relative h-64 w-full overflow-hidden">
+              {spot.thumbnail_url ? (
+                <img
+                  src={spot.thumbnail_url}
+                  alt={spot.name}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="h-full w-full bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                  No image
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+              {/* D-Day */}
+              {dday && (
+                <div className="absolute top-3 left-3">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
+                    {dday}
+                  </span>
+                </div>
+              )}
+
+              {/* Vibe */}
+              {vibeFresh && (
+                <div className="absolute top-3 right-3">
+                  <div className="px-3 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60 flex items-center gap-1">
+                    <span>{vibeFresh.label}</span>
+                    {vibeFresh.isLive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Bottom text */}
+              <div className="absolute bottom-3 left-3 right-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-lg font-semibold truncate">{spot.name}</p>
+                    {spot.distance !== undefined && (
+                      <p className="text-xs text-gray-300 mt-0.5">
+                        {formatDistance(spot.distance)} away
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Info block */}
+            <div className="px-4 py-4 space-y-2">
+              {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                <p className="text-xs text-gray-400">
+                  {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                </p>
+              )}
+
+              {spot.description && (
+                <p className="text-sm text-gray-200 mt-1">
+                  {spot.description}
+                </p>
+              )}
+
+              {/* Hashtags */}
+              {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {spot.hashtags.slice(0, 6).map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Info URL & phone */}
+              <div className="flex flex-wrap items-center gap-3 mt-3">
+                {spot.info_url && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.open(spot.info_url, '_blank', 'noopener,noreferrer')
+                    }}
+                    className="px-3 py-1.5 rounded-full border border-[#ADFF2F]/60 text-xs font-semibold text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
+                  >
+                    Open info
+                  </button>
+                )}
+                {spot.phone && (
+                  <span className="text-xs text-gray-300">
+                    📞 {spot.phone}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Feed 포스트 섹션 (최신 포스팅 순, 촬영일시 표시) */}
+          <div className="mt-6">
+            <h2 className="text-sm font-semibold text-gray-300 mb-2">
+              Feed
+            </h2>
+            {communityPosts.length === 0 ? (
+              <p className="text-xs text-gray-500">
+                No posts yet for this place.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {communityPosts.map((post) => (
+                  <div
+                    key={post.id}
+                    className="relative cursor-pointer overflow-hidden rounded-lg border border-gray-800 bg-gray-900/60"
+                    onClick={() => handlePostClick(post)}
+                  >
+                    <div className="h-28 w-full overflow-hidden">
+                      <img
+                        src={post.image || post.images?.[0]}
+                        alt={post.placeName}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                    <div className="absolute bottom-1 left-1 right-1">
+                      <p className="text-[11px] text-gray-200 truncate">
+                        {post.metadata?.capturedAt
+                          ? formatCapturedTimeWithRecency(post.metadata.capturedAt)
+                          : (post.timestamp ? formatCapturedTimeWithRecency(post.timestamp) : (post.description || post.placeName))}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
       </div>
     )
   }
@@ -1489,9 +1962,14 @@ function App() {
                     >
                       <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
                       {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
-                        <p className="text-xs text-gray-400 mb-2">
-                          {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
-                        </p>
+                        <div className="text-xs text-gray-400 mb-2 space-y-0.5">
+                          <p>{formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}</p>
+                          {spot.displayStatus && (
+                            <p className="text-[11px] text-[#ADFF2F]">
+                              {spot.displayStatus === 'scheduled' ? '시작 예정' : '진행중'}
+                            </p>
+                          )}
+                        </div>
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
@@ -2127,13 +2605,14 @@ function App() {
                         )}
                       </div>
                       
-                      {/* View Detail 버튼 */}
+                      {/* View Detail 버튼: 해당 장소 상세 화면으로 이동 */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           e.preventDefault()
-                          handlePlaceClick(spot.id)
-                          setCurrentView('feed')
+                          setSelectedDiscoverSpot(spot)
+                          setDiscoverDetailFrom('home')
+                          setCurrentView('discover-detail')
                         }}
                         className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors mt-3"
                       >
@@ -3384,9 +3863,9 @@ function PostVibeModal({
 // Bottom Navigation Component
 function BottomNav({ currentView, onNavClick }) {
   const navItems = [
+    { id: 'discover', label: 'Discover', icon: '⭐' },
     { id: 'feed', label: 'Feed', icon: '📱' },
     { id: 'map', label: 'Map', icon: '🗺️' },
-    { id: 'quest', label: 'Quest', icon: '🎯' },
     { id: 'my', label: 'My', icon: '👤' },
   ]
 
