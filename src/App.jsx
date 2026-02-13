@@ -9,7 +9,7 @@ import Masonry from 'react-masonry-css'
 import { auth, db, supabase } from './lib/supabase'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 import { getCommonCodes, getCustomPlaceNames } from './lib/admin'
-import { formatUtcAsKstDisplay, getTodayKSTDateKey, getKstDateKeyFromString, getCalendarDaysBetweenKeys } from './lib/kstDateUtils.js'
+import { formatUtcAsKstDisplay, getTodayKSTDateKey, getKstDateKeyFromString, getCalendarDaysBetweenKeys, getCurrentOrNextPeriod } from './lib/kstDateUtils.js'
 
 function App() {
   const location = useLocation()
@@ -243,6 +243,7 @@ function App() {
             description: place.description,
             display_start_date: place.display_start_date,
             display_end_date: place.display_end_date,
+            display_periods: place.display_periods,
             displayStatus: place.displayStatus || 'active',
           }
         })
@@ -1254,6 +1255,67 @@ function App() {
     return null
   }
 
+  // 복수 노출기간 시 현재/다음 구간 하나 반환, 없으면 단일 기간 폴백
+  const getEffectiveDisplayPeriod = (spot) => {
+    const ep = getCurrentOrNextPeriod(spot.display_periods || [])
+    if (ep) return ep
+    if (spot.display_start_date || spot.display_end_date) {
+      return { start: spot.display_start_date, end: spot.display_end_date }
+    }
+    return null
+  }
+
+  const formatDisplayPeriodForSpot = (spot) => {
+    const ep = getEffectiveDisplayPeriod(spot)
+    return ep ? formatDisplayPeriod(ep.start, ep.end) : null
+  }
+
+  // D-day 배지 라벨 (Discover·Feed 공통 — 복수 구간 시 현재/다음 구간 기준, 한국 시간 날짜)
+  const getDDayBadgeLabel = (spot) => {
+    const ep = getEffectiveDisplayPeriod(spot)
+    if (!ep || (!ep.start && !ep.end)) return null
+    const now = new Date()
+    const todayKey = getTodayKSTDateKey()
+    const startKey = getKstDateKeyFromString(ep.start)
+    const endKey = getKstDateKeyFromString(ep.end)
+    const startDiffDays = startKey != null ? getCalendarDaysBetweenKeys(todayKey, startKey) : null
+    const endDiffDays = endKey != null ? getCalendarDaysBetweenKeys(todayKey, endKey) : null
+    const start = ep.start ? new Date(ep.start) : null
+    const end = ep.end ? new Date(ep.end) : null
+    if (start && now < start) {
+      if (startDiffDays !== null && startDiffDays > 0) return `D-${startDiffDays}`
+      return 'D-0'
+    }
+    if (start && (!end || now <= end)) {
+      if (endDiffDays === null) return 'On now'
+      if (endDiffDays > 1) return `${endDiffDays} days left`
+      if (endDiffDays === 1) return 'Ends tomorrow'
+      if (endDiffDays === 0) return 'Ends today'
+      return 'On now'
+    }
+    return null
+  }
+
+  // 혼잡도/Vibe 라벨 (Discover·Feed 공통 — 최신 포스트 30분 이내만 표시)
+  const getFreshVibeLabelForSpot = (spot) => {
+    const now = new Date()
+    const postsForPlace = vibePosts.filter(
+      (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+    )
+    if (postsForPlace.length === 0) return null
+    const latest = postsForPlace.reduce((acc, cur) => {
+      const t = cur.metadata?.capturedAt ? new Date(cur.metadata.capturedAt).getTime() : (cur.timestamp ? new Date(cur.timestamp).getTime() : 0)
+      const accT = acc.metadata?.capturedAt ? new Date(acc.metadata.capturedAt).getTime() : (acc.timestamp ? new Date(acc.timestamp).getTime() : 0)
+      return t > accT ? cur : acc
+    })
+    const capturedAt = latest.metadata?.capturedAt ? new Date(latest.metadata.capturedAt) : (latest.timestamp ? new Date(latest.timestamp) : null)
+    if (!capturedAt) return null
+    const diffMinutes = (now.getTime() - capturedAt.getTime()) / (1000 * 60)
+    if (diffMinutes > 30) return null
+    const vibeInfo = getVibeInfo(latest.vibe)
+    return { label: vibeInfo.label, isLive: diffMinutes <= 10 }
+  }
+
   // Discover 정렬 상태 / 상세 선택
   const [discoverSort, setDiscoverSort] = useState('distance') // 'distance' | 'latest' | 'hot'
   const [selectedDiscoverSpot, setSelectedDiscoverSpot] = useState(null)
@@ -1388,37 +1450,6 @@ function App() {
       return (sb.count || 0) - (sa.count || 0)
     })
 
-    const now = new Date()
-
-    const renderDDayBadge = (spot) => {
-      const start = spot.display_start_date ? new Date(spot.display_start_date) : null
-      const end = spot.display_end_date ? new Date(spot.display_end_date) : null
-      if (!start && !end) return null
-
-      const todayKey = getTodayKSTDateKey()
-      const startKey = getKstDateKeyFromString(spot.display_start_date)
-      const endKey = getKstDateKeyFromString(spot.display_end_date)
-      const startDiffDays = startKey != null ? getCalendarDaysBetweenKeys(todayKey, startKey) : null
-      const endDiffDays = endKey != null ? getCalendarDaysBetweenKeys(todayKey, endKey) : null
-
-      // 시작 전: D-n 형식 (한국 시간 날짜 기준)
-      if (start && now < start) {
-        if (startDiffDays !== null && startDiffDays > 0) return `D-${startDiffDays}`
-        return 'D-0'
-      }
-
-      // 진행 중: 종료까지 남은 기간 (한국 시간 날짜 기준 — 오늘/내일 구분)
-      if (start && (!end || now <= end)) {
-        if (endDiffDays === null) return 'On now'
-        if (endDiffDays > 1) return `${endDiffDays} days left`
-        if (endDiffDays === 1) return 'Ends tomorrow'
-        if (endDiffDays === 0) return 'Ends today'
-        return 'On now'
-      }
-
-      return null
-    }
-
     const getFreshVibeLabel = (spot) => {
       // 해당 장소에 대한 최신 포스트 찾기
       const postsForPlace = vibePosts.filter(
@@ -1492,7 +1523,7 @@ function App() {
             </p>
           ) : (
             sortedSpots.map((spot) => {
-              const dday = renderDDayBadge(spot)
+              const dday = getDDayBadgeLabel(spot)
               const vibeFresh = getFreshVibeLabel(spot)
               return (
                 <div
@@ -1557,9 +1588,9 @@ function App() {
 
                   {/* Info area under image */}
                   <div className="px-4 py-3 space-y-1.5">
-                    {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                    {formatDisplayPeriodForSpot(spot) && (
                       <p className="text-xs text-gray-400">
-                        {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                        {formatDisplayPeriodForSpot(spot)}
                       </p>
                     )}
                     {/* Hashtags */}
@@ -1597,31 +1628,8 @@ function App() {
     }
 
     const spot = selectedDiscoverSpot
+    const dday = getDDayBadgeLabel(spot)
     const now = new Date()
-
-    const start = spot.display_start_date ? new Date(spot.display_start_date) : null
-    const end = spot.display_end_date ? new Date(spot.display_end_date) : null
-    const dday = (() => {
-      if (!start && !end) return null
-      const todayKey = getTodayKSTDateKey()
-      const startKey = getKstDateKeyFromString(spot.display_start_date)
-      const endKey = getKstDateKeyFromString(spot.display_end_date)
-      const startDiffDays = startKey != null ? getCalendarDaysBetweenKeys(todayKey, startKey) : null
-      const endDiffDays = endKey != null ? getCalendarDaysBetweenKeys(todayKey, endKey) : null
-      if (start && now < start) {
-        if (startDiffDays !== null && startDiffDays > 0) return `D-${startDiffDays}`
-        return 'D-0'
-      }
-      if (start && (!end || now <= end)) {
-        if (endDiffDays === null) return 'On now'
-        if (endDiffDays > 1) return `${endDiffDays} days left`
-        if (endDiffDays === 1) return 'Ends tomorrow'
-        if (endDiffDays === 0) return 'Ends today'
-        return 'On now'
-      }
-      return null
-    })()
-
     const vibeFresh = (() => {
       const postsForPlace = vibePosts.filter(
         (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
@@ -1738,9 +1746,9 @@ function App() {
 
             {/* Info block */}
             <div className="px-4 py-4 space-y-2">
-              {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+              {formatDisplayPeriodForSpot(spot) && (
                 <p className="text-xs text-gray-400">
-                  {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                  {formatDisplayPeriodForSpot(spot)}
                 </p>
               )}
 
@@ -1950,7 +1958,10 @@ function App() {
             if (filteredSpots.length > 0) {
               return (
                 <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                  {filteredSpots.map((spot) => (
+                  {filteredSpots.map((spot) => {
+                    const ddayLabel = getDDayBadgeLabel(spot)
+                    const vibeFresh = getFreshVibeLabelForSpot(spot)
+                    return (
                     <div
                       key={spot.id}
                       onClick={() => handlePlaceClick(spot.id)}
@@ -1961,18 +1972,25 @@ function App() {
                       }`}
                     >
                       <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
-                      {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                      {formatDisplayPeriodForSpot(spot) && (
                         <div className="text-xs text-gray-400 mb-2 space-y-0.5">
-                          <p>{formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}</p>
-                          {spot.displayStatus && (
+                          <p>{formatDisplayPeriodForSpot(spot)}</p>
+                          {ddayLabel && (
                             <p className="text-[11px] text-[#ADFF2F]">
-                              {spot.displayStatus === 'scheduled' ? '시작 예정' : '진행중'}
+                              {ddayLabel}
                             </p>
                           )}
                         </div>
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-[#ADFF2F]">{spot.status}</span>
+                        {vibeFresh ? (
+                          <span className="text-xs text-[#ADFF2F] flex items-center gap-1">
+                            {vibeFresh.isLive && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                            )}
+                            {vibeFresh.label}
+                          </span>
+                        ) : null}
                         {spot.distance !== undefined && (
                           <>
                             <span className="text-xs text-gray-500">•</span>
@@ -1981,7 +1999,8 @@ function App() {
                         )}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )
             } else {
@@ -2595,9 +2614,9 @@ function App() {
                             {!['popup_store', 'restaurant', 'shop'].includes(spot.type) && spot.type}
                           </div>
                         )}
-                        {formatDisplayPeriod(spot.display_start_date, spot.display_end_date) && (
+                        {formatDisplayPeriodForSpot(spot) && (
                           <div className="text-xs text-[#ADFF2F] mb-1">
-                            {formatDisplayPeriod(spot.display_start_date, spot.display_end_date)}
+                            {formatDisplayPeriodForSpot(spot)}
                           </div>
                         )}
                         {spot.description && (

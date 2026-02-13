@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
-import { getDisplayStatusKST, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
+import { getDisplayStatusFromPeriods, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
 import imageCompression from 'browser-image-compression'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -89,7 +89,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     // Filter by display status (한국 시간 기준)
     if (searchDisplayStatus) {
       filtered = filtered.filter(place => {
-        const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
+        const status = getDisplayStatusFromPeriods(place.display_periods, place.display_start_date, place.display_end_date)
         switch (searchDisplayStatus) {
           case 'active':
             return status === 'active'
@@ -175,7 +175,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     if (!place.display_start_date && !place.display_end_date) {
       return <span className="text-xs text-gray-500">무제한</span>
     }
-    const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
+    const status = getDisplayStatusFromPeriods(place.display_periods, place.display_start_date, place.display_end_date)
     const statusColor = status === 'active' ? 'text-green-400' : status === 'scheduled' ? 'text-yellow-400' : status === 'expired' ? 'text-red-400' : 'text-gray-500'
     const startStr = place.display_start_date ? formatUtcAsKstDisplay(place.display_start_date) : '시작일 없음'
     const endStr = place.display_end_date ? formatUtcAsKstDisplay(place.display_end_date) : '종료일 없음'
@@ -439,7 +439,27 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
 }
 
 // PlaceForm component
+// 노출기간 초기값: display_periods 또는 단일 display_start_date/display_end_date → [{ start, end }, ...]
+function initialDisplayPeriods(place) {
+  if (Array.isArray(place?.display_periods) && place.display_periods.length > 0) {
+    return place.display_periods.map((p) => ({
+      start: p.display_start_date ? utcToKstDateTimeString(p.display_start_date) : '',
+      end: p.display_end_date ? utcToKstDateTimeString(p.display_end_date) : '',
+    }))
+  }
+  if (place?.display_start_date || place?.display_end_date) {
+    return [
+      {
+        start: place.display_start_date ? utcToKstDateTimeString(place.display_start_date) : '',
+        end: place.display_end_date ? utcToKstDateTimeString(place.display_end_date) : '',
+      },
+    ]
+  }
+  return []
+}
+
 const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeletePlace }) => {
+  const initialPeriods = initialDisplayPeriods(place)
   const [formData, setFormData] = useState({
     name: place?.name || '',
     type: place?.type || '',
@@ -447,9 +467,8 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     lat: place?.lat || '',
     lng: place?.lng || '',
     is_active: place?.is_active !== undefined ? place.is_active : true,
-    display_start_date: place?.display_start_date ? utcToKstDateTimeString(place.display_start_date) : '',
-    display_end_date: place?.display_end_date ? utcToKstDateTimeString(place.display_end_date) : '',
-    unlimited_display: !place?.display_start_date && !place?.display_end_date,
+    display_periods: initialPeriods.length > 0 ? initialPeriods : [],
+    unlimited_display: initialPeriods.length === 0,
     info_url: place?.info_url || '',
     phone: place?.phone || '',
   })
@@ -488,6 +507,34 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         setMapZoom(16) // 직접 입력 시에는 확대
       }
     }
+  }
+
+  const setDisplayPeriod = (index, key, value) => {
+    setFormData((prev) => {
+      const next = [...(prev.display_periods || [])]
+      if (!next[index]) next[index] = { start: '', end: '' }
+      next[index] = { ...next[index], [key]: value }
+      return { ...prev, display_periods: next }
+    })
+  }
+
+  const addDisplayPeriod = () => {
+    setFormData((prev) => ({
+      ...prev,
+      display_periods: [...(prev.display_periods || []), { start: '', end: '' }],
+      unlimited_display: false,
+    }))
+  }
+
+  const removeDisplayPeriod = (index) => {
+    setFormData((prev) => {
+      const next = (prev.display_periods || []).filter((_, i) => i !== index)
+      return {
+        ...prev,
+        display_periods: next.length > 0 ? next : [{ start: '', end: '' }],
+        unlimited_display: next.length === 0,
+      }
+    })
   }
 
   // Leaflet 기본 아이콘 설정
@@ -604,22 +651,22 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         thumbnailUrl = uploadData.publicUrl
       }
 
-      // 관리자가 입력한 한국 시간 그대로 DB에 저장
-      let displayStartDate = null
-      let displayEndDate = null
-      if (!formData.unlimited_display) {
-        displayStartDate = kstDateTimeToDbString(formData.display_start_date) || null
-        displayEndDate = kstDateTimeToDbString(formData.display_end_date) || null
-      }
+      // 복수 노출기간: 무제한이면 [], 아니면 구간 배열(KST DB 문자열)
+      const display_periods = formData.unlimited_display
+        ? []
+        : (formData.display_periods || [])
+            .map((p) => ({
+              start: kstDateTimeToDbString(p.start) || null,
+              end: kstDateTimeToDbString(p.end) || null,
+            }))
+            .filter((p) => p.start != null || p.end != null)
 
-      // Save place (name_en은 null로 설정)
       const result = await savePlace(
         {
           ...formData,
-          name_en: null, // 영문명 필드 제거
+          name_en: null,
           thumbnail_url: thumbnailUrl,
-          display_start_date: displayStartDate,
-          display_end_date: displayEndDate,
+          display_periods,
           hashtags: selectedTags,
         },
         place?.id || null
@@ -950,7 +997,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           </div>
         </div>
 
-        {/* Display Period */}
+        {/* Display Period (복수 구간 지원) */}
         <div>
           <label className="block text-sm font-medium mb-2 text-gray-300">
             노출기간 <span className="text-gray-500 text-xs">(선택)</span>
@@ -961,37 +1008,59 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                 type="checkbox"
                 checked={formData.unlimited_display}
                 onChange={(e) => {
-                  handleInputChange('unlimited_display', e.target.checked)
-                  if (e.target.checked) {
-                    handleInputChange('display_start_date', '')
-                    handleInputChange('display_end_date', '')
-                  }
+                  const checked = e.target.checked
+                  setFormData((prev) => ({
+                    ...prev,
+                    unlimited_display: checked,
+                    display_periods: checked ? [] : (prev.display_periods?.length ? prev.display_periods : [{ start: '', end: '' }]),
+                  }))
                 }}
                 className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-[#ADFF2F] focus:ring-[#ADFF2F]"
               />
               <span className="text-sm text-gray-300">무제한 노출</span>
             </label>
-            
+
             {!formData.unlimited_display && (
-              <div className="grid grid-cols-2 gap-4 pl-6">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">시작일시 (KST)</label>
-                  <input
-                    type="datetime-local"
-                    value={formData.display_start_date}
-                    onChange={(e) => handleInputChange('display_start_date', e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">종료일시 (KST)</label>
-                  <input
-                    type="datetime-local"
-                    value={formData.display_end_date}
-                    onChange={(e) => handleInputChange('display_end_date', e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-                  />
-                </div>
+              <div className="space-y-4 pl-6">
+                {(formData.display_periods || []).map((period, index) => (
+                  <div key={index} className="flex gap-2 items-end flex-wrap">
+                    <div className="grid grid-cols-2 gap-4 flex-1 min-w-0">
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">시작일시 (KST)</label>
+                        <input
+                          type="datetime-local"
+                          value={period.start || ''}
+                          onChange={(e) => setDisplayPeriod(index, 'start', e.target.value)}
+                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">종료일시 (KST)</label>
+                        <input
+                          type="datetime-local"
+                          value={period.end || ''}
+                          onChange={(e) => setDisplayPeriod(index, 'end', e.target.value)}
+                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeDisplayPeriod(index)}
+                      className="px-3 py-2 bg-gray-700 hover:bg-red-900/50 text-gray-300 hover:text-red-400 rounded-lg text-sm shrink-0"
+                      title="이 구간 삭제"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addDisplayPeriod}
+                  className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-sm text-gray-400 hover:text-[#ADFF2F] transition-colors"
+                >
+                  + 노출기간 추가
+                </button>
               </div>
             )}
           </div>

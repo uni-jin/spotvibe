@@ -309,8 +309,25 @@ export const getAdminPlaces = async () => {
       return []
     }
 
+    const placeIds = places.map((p) => p.id)
+    const { data: periodsRows } = await supabase
+      .from('place_display_periods')
+      .select('place_id, display_start_date, display_end_date, display_order')
+      .in('place_id', placeIds)
+      .order('display_order', { ascending: true })
+
+    const periodsByPlace = {}
+    if (periodsRows && periodsRows.length > 0) {
+      periodsRows.forEach((row) => {
+        if (!periodsByPlace[row.place_id]) periodsByPlace[row.place_id] = []
+        periodsByPlace[row.place_id].push({
+          display_start_date: row.display_start_date,
+          display_end_date: row.display_end_date,
+        })
+      })
+    }
+
     // Get recent posts for each place (metadata 포함: 촬영 일시 기준 정렬용)
-    const placeIds = places.map(p => p.id)
     const { data: posts, error: postsError } = await supabase
       .from('posts')
       .select('id, place_id, place_name, vibe, created_at, metadata, user_id')
@@ -371,6 +388,7 @@ export const getAdminPlaces = async () => {
 
       return {
         ...place,
+        display_periods: periodsByPlace[place.id] || null,
         recentVibe: latestPost?.vibe || null,
         recentPostTime: capturedAt,
         postCount: placePosts.length,
@@ -436,9 +454,12 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
       return { success: false, error: 'Custom place not found' }
     }
 
-    // 관리자가 입력한 한국 시간 그대로 DB에 저장
-    let displayStartDate = kstDateTimeToDbString(placeData.display_start_date) || null
-    let displayEndDate = kstDateTimeToDbString(placeData.display_end_date) || null
+    const displayStartDate = kstDateTimeToDbString(placeData.display_start_date) || null
+    const displayEndDate = kstDateTimeToDbString(placeData.display_end_date) || null
+    const p_display_periods =
+      displayStartDate != null || displayEndDate != null
+        ? [{ start: displayStartDate, end: displayEndDate }]
+        : []
 
     // Create official place using admin function
     const { data: newPlaceData, error: placeError } = await supabase.rpc('admin_save_place', {
@@ -453,7 +474,8 @@ export const promoteCustomPlace = async (customPlaceId, placeData) => {
       p_is_active: true,
       p_region_id: null,
       p_display_start_date: displayStartDate,
-      p_display_end_date: displayEndDate
+      p_display_end_date: displayEndDate,
+      p_display_periods,
     })
 
     const newPlace = Array.isArray(newPlaceData) && newPlaceData.length > 0 ? newPlaceData[0] : newPlaceData
@@ -512,9 +534,22 @@ export const savePlace = async (placeData, placeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    // 관리자가 입력한 한국 시간 그대로 DB에 저장
-    let displayStartDate = kstDateTimeToDbString(placeData.display_start_date) || null
-    let displayEndDate = kstDateTimeToDbString(placeData.display_end_date) || null
+    // 복수 노출기간: display_periods 우선, 없으면 단일 display_start_date/display_end_date
+    let p_display_periods = []
+    if (Array.isArray(placeData.display_periods) && placeData.display_periods.length > 0) {
+      p_display_periods = placeData.display_periods
+        .map((p) => ({
+          start: kstDateTimeToDbString(p.start) || null,
+          end: kstDateTimeToDbString(p.end) || null,
+        }))
+        .filter((p) => p.start != null || p.end != null)
+    }
+    const displayStartDate = p_display_periods.length > 0
+      ? p_display_periods[0].start
+      : (kstDateTimeToDbString(placeData.display_start_date) || null)
+    const displayEndDate = p_display_periods.length > 0
+      ? p_display_periods[0].end
+      : (kstDateTimeToDbString(placeData.display_end_date) || null)
 
     // Use SECURITY DEFINER function to bypass RLS
     const { data, error } = await supabase.rpc('admin_save_place', {
@@ -530,6 +565,7 @@ export const savePlace = async (placeData, placeId = null) => {
       p_region_id: placeData.region_id || null,
       p_display_start_date: displayStartDate,
       p_display_end_date: displayEndDate,
+      p_display_periods: p_display_periods,
     })
 
     if (error) {

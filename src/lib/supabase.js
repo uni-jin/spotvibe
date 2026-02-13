@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { getDisplayStatusKST } from './kstDateUtils.js'
+import { getDisplayStatusFromPeriods } from './kstDateUtils.js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -138,17 +138,42 @@ export const db = {
       query = query.eq('region_id', regionId)
     }
 
-    const { data, error } = await query
+    const { data: placesData, error } = await query
 
     if (error) {
       console.error('Error fetching places:', error)
       return []
     }
 
-    // Client-side filtering for display period (저장된 한국 시간 기준)
-    const withStatus = data.map((place) => {
-      const status = getDisplayStatusKST(place.display_start_date, place.display_end_date)
-      return { place, displayStatus: status }
+    if (!placesData || placesData.length === 0) return []
+
+    const placeIds = placesData.map((p) => p.id)
+    const { data: periodsRows } = await supabase
+      .from('place_display_periods')
+      .select('place_id, display_start_date, display_end_date, display_order')
+      .in('place_id', placeIds)
+      .order('display_order', { ascending: true })
+
+    const periodsByPlace = {}
+    if (periodsRows && periodsRows.length > 0) {
+      periodsRows.forEach((row) => {
+        if (!periodsByPlace[row.place_id]) periodsByPlace[row.place_id] = []
+        periodsByPlace[row.place_id].push({
+          display_start_date: row.display_start_date,
+          display_end_date: row.display_end_date,
+        })
+      })
+    }
+
+    // 복수 노출기간 또는 단일 기간 기준 노출 상태
+    const withStatus = placesData.map((place) => {
+      const display_periods = periodsByPlace[place.id] || null
+      const status = getDisplayStatusFromPeriods(
+        display_periods,
+        place.display_start_date,
+        place.display_end_date
+      )
+      return { place, display_periods, displayStatus: status }
     })
 
     // Hot Spots Now에는 진행중/시작 예정(및 무제한)만 노출, 종료는 제외
@@ -159,7 +184,7 @@ export const db = {
         item.displayStatus === 'unlimited'
     )
 
-    return filtered.map(({ place, displayStatus }) => ({
+    return filtered.map(({ place, display_periods, displayStatus }) => ({
       id: place.id,
       name: place.name,
       nameEn: place.name_en,
@@ -172,6 +197,7 @@ export const db = {
       description: place.description,
       display_start_date: place.display_start_date,
       display_end_date: place.display_end_date,
+      display_periods: display_periods || undefined,
       info_url: place.info_url,
       phone: place.phone,
       hashtags: place.hashtags || [],

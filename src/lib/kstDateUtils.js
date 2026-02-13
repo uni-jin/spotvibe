@@ -130,6 +130,59 @@ export function getCalendarDaysBetweenKeys(key1, key2) {
   return Math.round((toDate(key2) - toDate(key1)) / (24 * 60 * 60 * 1000))
 }
 
-// 하위 호환용 별칭 (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처)
+/**
+ * 복수 노출기간 중 "현재 진행 중" 또는 "다음 예정" 구간 하나 반환
+ * @param {Array<{display_start_date?: string, display_end_date?: string, start?: string, end?: string}>} periods
+ * @returns {{ start: string, end: string } | null}
+ */
+export function getCurrentOrNextPeriod(periods) {
+  if (!Array.isArray(periods) || periods.length === 0) return null
+  const now = new Date()
+  const normalized = periods
+    .map((p) => {
+      const start = p.display_start_date ?? p.start
+      const end = p.display_end_date ?? p.end
+      if (!start && !end) return null
+      return {
+        startKst: start,
+        endKst: end,
+        startInst: start ? kstStringToInstant(start) : null,
+        endInst: end ? kstStringToInstant(end) : null,
+      }
+    })
+    .filter(Boolean)
+  if (normalized.length === 0) return null
+  normalized.sort((a, b) => {
+    const aStart = a.startInst ? a.startInst.getTime() : 0
+    const bStart = b.startInst ? b.startInst.getTime() : 0
+    return aStart - bStart
+  })
+  for (const p of normalized) {
+    const inRange =
+      (!p.startInst || p.startInst <= now) && (!p.endInst || p.endInst >= now)
+    if (inRange) return { start: p.startKst, end: p.endKst }
+  }
+  for (const p of normalized) {
+    if (p.startInst && p.startInst > now) return { start: p.startKst, end: p.endKst }
+  }
+  return null
+}
+
+/**
+ * 복수 노출기간 또는 단일 기간으로 노출 상태 반환
+ * @param {Array} periods - place_display_periods 스타일 배열 (또는 빈 배열)
+ * @param {string|null} fallbackStart - periods 없을 때 사용
+ * @param {string|null} fallbackEnd - periods 없을 때 사용
+ */
+export function getDisplayStatusFromPeriods(periods, fallbackStart, fallbackEnd) {
+  if (Array.isArray(periods) && periods.length > 0) {
+    const effective = getCurrentOrNextPeriod(periods)
+    if (effective) return getDisplayStatusKST(effective.start, effective.end)
+    return 'expired'
+  }
+  return getDisplayStatusKST(fallbackStart, fallbackEnd)
+}
+
+// 하위 호환용 별칭 (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처) (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처)
 export const utcToKstDateTimeString = dbKstToFormString
 export const formatUtcAsKstDisplay = formatKstDisplay
