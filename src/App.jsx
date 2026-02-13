@@ -1451,7 +1451,7 @@ function App() {
     })
 
     const getFreshVibeLabel = (spot) => {
-      // 해당 장소에 대한 최신 포스트 찾기
+      const now = new Date()
       const postsForPlace = vibePosts.filter(
         (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
       )
