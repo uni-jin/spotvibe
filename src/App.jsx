@@ -1756,7 +1756,7 @@ function App() {
               )}
 
               {spot.description && (
-                <p className="text-sm text-gray-200 mt-1">
+                <p className="text-sm text-gray-200 mt-1 whitespace-pre-line">
                   {spot.description}
                 </p>
               )}
@@ -2623,7 +2623,9 @@ function App() {
                           </div>
                         )}
                         {spot.description && (
-                          <div className="text-xs text-gray-400 mb-2">{spot.description}</div>
+                          <div className="text-xs text-gray-400 mb-2 line-clamp-2 break-words whitespace-pre-line">
+                            {spot.description}
+                          </div>
                         )}
                       </div>
                       
