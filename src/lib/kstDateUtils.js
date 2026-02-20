@@ -169,6 +169,49 @@ export function getCurrentOrNextPeriod(periods) {
 }
 
 /**
+ * 복수 노출기간 중 이미 지난 구간 중 종료일이 가장 늦은 구간 하나 반환 (관리자 목록 표시용)
+ * @param {Array<{display_start_date?: string, display_end_date?: string, start?: string, end?: string}>} periods
+ * @returns {{ start: string, end: string } | null}
+ */
+export function getLastExpiredPeriod(periods) {
+  if (!Array.isArray(periods) || periods.length === 0) return null
+  const now = new Date()
+  const normalized = periods
+    .map((p) => {
+      const start = p.display_start_date ?? p.start
+      const end = p.display_end_date ?? p.end
+      if (!start && !end) return null
+      return {
+        startKst: start,
+        endKst: end,
+        endInst: end ? kstStringToInstant(end) : null,
+      }
+    })
+    .filter(Boolean)
+  const expired = normalized.filter((p) => p.endInst && p.endInst < now)
+  if (expired.length === 0) return null
+  expired.sort((a, b) => (b.endInst?.getTime() ?? 0) - (a.endInst?.getTime() ?? 0))
+  const last = expired[0]
+  return { start: last.startKst, end: last.endKst }
+}
+
+/**
+ * 관리자 목록 노출기간 표시용: 현재/다음 구간 우선, 없으면 마지막 지난 구간, 없으면 단일 기간 폴백
+ * @param {Array} periods - place_display_periods
+ * @param {string|null} fallbackStart - places.display_start_date
+ * @param {string|null} fallbackEnd - places.display_end_date
+ * @returns {{ start: string, end: string } | null}
+ */
+export function getDisplayPeriodForAdminList(periods, fallbackStart, fallbackEnd) {
+  const currentOrNext = getCurrentOrNextPeriod(periods || [])
+  if (currentOrNext) return currentOrNext
+  const lastExpired = getLastExpiredPeriod(periods || [])
+  if (lastExpired) return lastExpired
+  if (fallbackStart || fallbackEnd) return { start: fallbackStart || null, end: fallbackEnd || null }
+  return null
+}
+
+/**
  * 복수 노출기간 또는 단일 기간으로 노출 상태 반환
  * @param {Array} periods - place_display_periods 스타일 배열 (또는 빈 배열)
  * @param {string|null} fallbackStart - periods 없을 때 사용
@@ -183,6 +226,6 @@ export function getDisplayStatusFromPeriods(periods, fallbackStart, fallbackEnd)
   return getDisplayStatusKST(fallbackStart, fallbackEnd)
 }
 
-// 하위 호환용 별칭 (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처) (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처)
+// 하위 호환용 별칭 (기존 코드에서 utcToKstDateTimeString, formatUtcAsKstDisplay 사용처)
 export const utcToKstDateTimeString = dbKstToFormString
 export const formatUtcAsKstDisplay = formatKstDisplay

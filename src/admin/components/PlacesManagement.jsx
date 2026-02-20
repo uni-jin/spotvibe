@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
-import { getDisplayStatusFromPeriods, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
+import { getDisplayStatusFromPeriods, getDisplayPeriodForAdminList, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
 import imageCompression from 'browser-image-compression'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -172,14 +172,19 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
   }
 
   const formatDisplayPeriod = (place) => {
-    if (!place.display_start_date && !place.display_end_date) {
+    const effectivePeriod = getDisplayPeriodForAdminList(
+      place.display_periods,
+      place.display_start_date,
+      place.display_end_date
+    )
+    if (!effectivePeriod || (!effectivePeriod.start && !effectivePeriod.end)) {
       return <span className="text-xs text-gray-500">무제한</span>
     }
     const status = getDisplayStatusFromPeriods(place.display_periods, place.display_start_date, place.display_end_date)
     const statusColor = status === 'active' ? 'text-green-400' : status === 'scheduled' ? 'text-yellow-400' : status === 'expired' ? 'text-red-400' : 'text-gray-500'
-    const startStr = place.display_start_date ? formatUtcAsKstDisplay(place.display_start_date) : '시작일 없음'
-    const endStr = place.display_end_date ? formatUtcAsKstDisplay(place.display_end_date) : '종료일 없음'
-    
+    const startStr = effectivePeriod.start ? formatUtcAsKstDisplay(effectivePeriod.start) : '시작일 없음'
+    const endStr = effectivePeriod.end ? formatUtcAsKstDisplay(effectivePeriod.end) : '종료일 없음'
+
     return (
       <div className="space-y-1">
         <div className={`text-xs ${statusColor} font-semibold`}>
