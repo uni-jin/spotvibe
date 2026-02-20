@@ -551,7 +551,19 @@ export const savePlace = async (placeData, placeId = null) => {
       ? p_display_periods[0].end
       : (kstDateTimeToDbString(placeData.display_end_date) || null)
 
-    // Use SECURITY DEFINER function to bypass RLS
+    let p_hashtags = null
+    if (placeData.hashtags) {
+      if (Array.isArray(placeData.hashtags)) {
+        p_hashtags = placeData.hashtags.length > 0 ? placeData.hashtags : null
+      } else if (typeof placeData.hashtags === 'string') {
+        const tags = placeData.hashtags
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        p_hashtags = tags.length > 0 ? tags : null
+      }
+    }
+
     const { data, error } = await supabase.rpc('admin_save_place', {
       p_name: placeData.name,
       p_type: placeData.type,
@@ -566,6 +578,9 @@ export const savePlace = async (placeData, placeId = null) => {
       p_display_start_date: displayStartDate,
       p_display_end_date: displayEndDate,
       p_display_periods: p_display_periods,
+      p_info_url: placeData.info_url || null,
+      p_phone: placeData.phone || null,
+      p_hashtags,
     })
 
     if (error) {
@@ -573,36 +588,7 @@ export const savePlace = async (placeData, placeId = null) => {
       return { success: false, error: error.message }
     }
 
-    // RPC returns array, get first element
     const result = Array.isArray(data) && data.length > 0 ? data[0] : data
-
-    // Update extra fields (info_url, phone, hashtags) directly on places table
-    const extraPayload = {
-      info_url: placeData.info_url || null,
-      phone: placeData.phone || null,
-    }
-    if (placeData.hashtags) {
-      if (Array.isArray(placeData.hashtags)) {
-        extraPayload.hashtags = placeData.hashtags
-      } else if (typeof placeData.hashtags === 'string') {
-        const tags = placeData.hashtags
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-        extraPayload.hashtags = tags.length > 0 ? tags : null
-      }
-    }
-
-    if (Object.values(extraPayload).some((v) => v !== undefined)) {
-      const placeIdToUpdate = result?.id || placeId
-      if (placeIdToUpdate) {
-        await supabase
-          .from('places')
-          .update(extraPayload)
-          .eq('id', placeIdToUpdate)
-      }
-    }
-
     return { success: true, data: result }
   } catch (error) {
     console.error('Error saving place:', error)

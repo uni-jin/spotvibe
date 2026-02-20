@@ -245,6 +245,9 @@ function App() {
             display_end_date: place.display_end_date,
             display_periods: place.display_periods,
             displayStatus: place.displayStatus || 'active',
+            info_url: place.info_url,
+            phone: place.phone,
+            hashtags: place.hashtags || [],
           }
         })
 

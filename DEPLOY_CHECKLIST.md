@@ -19,6 +19,9 @@ supabase db push
 - `019_display_dates_as_kst.sql` — 노출기간 한국 시간 그대로 저장
 - `020_storage_allow_places_upload.sql` — 관리자 장소 썸네일 업로드 허용
 - `021_place_display_periods.sql` — 복수 노출기간(place_display_periods) + admin_save_place 확장
+- `022_place_display_periods_rls.sql` — place_display_periods RLS (SELECT만 허용)
+- `023_place_tags_rls.sql` — place_tags, place_tag_mappings RLS (SELECT만 허용)
+- `024_admin_save_place_extra_fields.sql` — admin_save_place에 info_url, phone, hashtags 포함 (저장 시 RLS 우회)
 
 ### 1.2 Storage 정책 (020 적용 안 했다면)
 
