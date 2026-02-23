@@ -206,45 +206,26 @@ export const saveCommonCode = async (codeData, codeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    const codePayload = {
-      code_type: codeData.code_type,
-      code_value: codeData.code_value,
-      code_label: codeData.code_label,
-      display_order: codeData.display_order || 0,
-      is_active: codeData.is_active !== undefined ? codeData.is_active : true,
-      updated_at: new Date().toISOString()
+    const { data, error } = await supabase.rpc('admin_save_common_code', {
+      p_code_type: codeData.code_type,
+      p_code_value: codeData.code_value,
+      p_code_label: codeData.code_label,
+      p_display_order: codeData.display_order ?? 0,
+      p_is_active: codeData.is_active !== undefined ? codeData.is_active : true,
+      p_id: codeId || null
+    })
+
+    if (error) {
+      console.error('Error saving common code:', error)
+      return { success: false, error: error.message }
     }
-
-    let result
-    if (codeId) {
-      // Update existing code
-      const { data, error } = await supabase
-        .from('common_codes')
-        .update(codePayload)
-        .eq('id', codeId)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Error updating common code:', error)
-        return { success: false, error: error.message }
-      }
-
-      result = data
-    } else {
-      // Create new code
-      const { data, error } = await supabase
-        .from('common_codes')
-        .insert(codePayload)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Error creating common code:', error)
-        return { success: false, error: error.message }
-      }
-
-      result = data
+    // RPC returns array (SETOF); we expect one row for both insert and update
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+    if (result == null && codeId != null) {
+      return { success: false, error: '해당 코드를 찾을 수 없습니다.' }
+    }
+    if (result == null) {
+      return { success: false, error: '저장에 실패했습니다.' }
     }
 
     return { success: true, data: result }
@@ -271,10 +252,7 @@ export const deleteCommonCode = async (codeId) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    const { error } = await supabase
-      .from('common_codes')
-      .delete()
-      .eq('id', codeId)
+    const { error } = await supabase.rpc('admin_delete_common_code', { p_id: codeId })
 
     if (error) {
       console.error('Error deleting common code:', error)

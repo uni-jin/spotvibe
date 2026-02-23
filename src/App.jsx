@@ -50,6 +50,7 @@ function App() {
   const [customPlaceNames, setCustomPlaceNames] = useState([]) // 사용자 입력 "기타" 장소명 목록
   const [postsError, setPostsError] = useState(null) // 포스트 로드 에러
   const [placesError, setPlacesError] = useState(null) // 장소 로드 에러
+  const [placeTagLabelMap, setPlaceTagLabelMap] = useState({}) // code_value -> code_label (활성 태그만, 사용자 화면 표시용)
   const [postLikes, setPostLikes] = useState({}) // { postId: { count: number, liked: boolean } }
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false) // 삭제 확인 모달 표시 여부
   const [postToDelete, setPostToDelete] = useState(null) // 삭제할 포스트 ID
@@ -180,7 +181,18 @@ function App() {
       try {
         setIsLoadingPlaces(true)
         setPlacesError(null)
-        const places = await db.getPlaces()
+        const [places, admission, benefit, amenity, content] = await Promise.all([
+          db.getPlaces(),
+          getCommonCodes('place_tag_admission', false),
+          getCommonCodes('place_tag_benefit', false),
+          getCommonCodes('place_tag_amenity', false),
+          getCommonCodes('place_tag_content', false),
+        ])
+        const labelMap = {}
+        ;[...(admission || []), ...(benefit || []), ...(amenity || []), ...(content || [])].forEach((c) => {
+          if (c.code_value) labelMap[c.code_value] = c.code_label
+        })
+        setPlaceTagLabelMap(labelMap)
         
         // 장소별 포스팅 통계 (최신 Vibe 표시용) - 항상 계산
         const vibeIdToLabel = {
@@ -1596,19 +1608,23 @@ function App() {
                         {formatDisplayPeriodForSpot(spot)}
                       </p>
                     )}
-                    {/* Hashtags */}
-                    {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {spot.hashtags.slice(0, 4).map((tag) => (
-                          <span
-                            key={tag}
-                            className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {/* Hashtags: 활성 태그만 라벨로 표시, 숨김/삭제된 태그는 미표시 */}
+                    {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (() => {
+                      const visibleTags = spot.hashtags.filter((codeValue) => placeTagLabelMap[codeValue]).slice(0, 4)
+                      if (visibleTags.length === 0) return null
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {visibleTags.map((codeValue) => (
+                            <span
+                              key={codeValue}
+                              className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                            >
+                              #{placeTagLabelMap[codeValue]}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })()}
 
                   </div>
                 </div>
@@ -1761,19 +1777,23 @@ function App() {
                 </p>
               )}
 
-              {/* Hashtags */}
-              {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {spot.hashtags.slice(0, 6).map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
-                    >
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* Hashtags: 활성 태그만 라벨로 표시, 숨김/삭제된 태그는 미표시 */}
+              {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (() => {
+                const visibleTags = spot.hashtags.filter((codeValue) => placeTagLabelMap[codeValue]).slice(0, 6)
+                if (visibleTags.length === 0) return null
+                return (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {visibleTags.map((codeValue) => (
+                      <span
+                        key={codeValue}
+                        className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                      >
+                        #{placeTagLabelMap[codeValue]}
+                      </span>
+                    ))}
+                  </div>
+                )
+              })()}
 
               {/* Info URL & phone */}
               <div className="flex flex-wrap items-center gap-3 mt-3">

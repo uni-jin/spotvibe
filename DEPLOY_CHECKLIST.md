@@ -22,6 +22,7 @@ supabase db push
 - `022_place_display_periods_rls.sql` — place_display_periods RLS (SELECT만 허용)
 - `023_place_tags_rls.sql` — place_tags, place_tag_mappings RLS (SELECT만 허용)
 - `024_admin_save_place_extra_fields.sql` — admin_save_place에 info_url, phone, hashtags 포함 (저장 시 RLS 우회)
+- `025_admin_common_codes_rpc.sql` — 공통코드 저장/삭제 RPC (admin_save_common_code, admin_delete_common_code) — 관리자 수정 권한 해결
 
 ### 1.2 Storage 정책 (020 적용 안 했다면)
 

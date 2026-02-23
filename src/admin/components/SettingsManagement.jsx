@@ -1,19 +1,64 @@
 import { useState, useEffect } from 'react'
 import { changeAdminPassword, getCommonCodes, saveCommonCode, deleteCommonCode } from '../../lib/admin'
 
+const CODE_TYPE_OPTIONS = [
+  { value: 'place_category', label: '장소 카테고리' },
+  { value: 'tags', label: '태그' },
+]
+
+const TAG_GROUP_CONFIG = [
+  { key: 'admission', codeType: 'place_tag_admission', label: '입장/예약' },
+  { key: 'benefit', codeType: 'place_tag_benefit', label: '혜택' },
+  { key: 'amenity', codeType: 'place_tag_amenity', label: '편의' },
+  { key: 'content', codeType: 'place_tag_content', label: '콘텐츠' },
+]
+
+const PLACE_TAG_TYPES = ['place_tag_admission', 'place_tag_benefit', 'place_tag_amenity', 'place_tag_content']
+
 const SettingsManagement = () => {
-  const [activeTab, setActiveTab] = useState('password')
-  const [categories, setCategories] = useState([])
+  const [activeTab, setActiveTab] = useState('codes')
+  const [codes, setCodes] = useState([])
+  const [selectedCodeType, setSelectedCodeType] = useState('place_category')
+  const [tagCodesByGroup, setTagCodesByGroup] = useState({
+    admission: [],
+    benefit: [],
+    amenity: [],
+    content: [],
+  })
 
   useEffect(() => {
     if (activeTab === 'codes') {
-      loadCategories()
+      if (selectedCodeType === 'place_category') {
+        loadCodes('place_category')
+      } else if (selectedCodeType === 'tags') {
+        loadAllTagCodes()
+      }
     }
-  }, [activeTab])
+  }, [activeTab, selectedCodeType])
 
-  const loadCategories = async () => {
-    const data = await getCommonCodes('place_category', true) // Include inactive for admin
-    setCategories(data)
+  const loadCodes = async (codeType) => {
+    const data = await getCommonCodes(codeType, true)
+    setCodes(data)
+  }
+
+  const loadAllTagCodes = async () => {
+    const [admission, benefit, amenity, content] = await Promise.all([
+      getCommonCodes('place_tag_admission', true),
+      getCommonCodes('place_tag_benefit', true),
+      getCommonCodes('place_tag_amenity', true),
+      getCommonCodes('place_tag_content', true),
+    ])
+    setTagCodesByGroup({
+      admission: admission || [],
+      benefit: benefit || [],
+      amenity: amenity || [],
+      content: content || [],
+    })
+  }
+
+  const handleReloadCodes = () => {
+    if (selectedCodeType === 'place_category') loadCodes('place_category')
+    else loadAllTagCodes()
   }
 
   return (
@@ -21,16 +66,6 @@ const SettingsManagement = () => {
       <h2 className="text-2xl font-bold mb-6">설정</h2>
 
       <div className="flex gap-4 mb-6 border-b border-gray-800">
-        <button
-          onClick={() => setActiveTab('password')}
-          className={`px-4 py-2 border-b-2 transition-colors ${
-            activeTab === 'password'
-              ? 'border-[#ADFF2F] text-[#ADFF2F]'
-              : 'border-transparent text-gray-400 hover:text-white'
-          }`}
-        >
-          비밀번호 변경
-        </button>
         <button
           onClick={() => setActiveTab('codes')}
           className={`px-4 py-2 border-b-2 transition-colors ${
@@ -41,10 +76,55 @@ const SettingsManagement = () => {
         >
           공통코드 관리
         </button>
+        <button
+          onClick={() => setActiveTab('password')}
+          className={`px-4 py-2 border-b-2 transition-colors ${
+            activeTab === 'password'
+              ? 'border-[#ADFF2F] text-[#ADFF2F]'
+              : 'border-transparent text-gray-400 hover:text-white'
+          }`}
+        >
+          비밀번호 변경
+        </button>
       </div>
 
+      {activeTab === 'codes' && (
+        <>
+          <div className="mb-4">
+            <p className="text-sm font-medium text-gray-400 mb-2">코드 종류</p>
+            <div className="flex flex-wrap gap-1 border-b border-gray-800">
+              {CODE_TYPE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setSelectedCodeType(opt.value)}
+                  className={`px-3 py-2 text-sm border-b-2 transition-colors -mb-px ${
+                    selectedCodeType === opt.value
+                      ? 'border-[#ADFF2F] text-[#ADFF2F]'
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {selectedCodeType === 'place_category' && (
+            <CommonCodesManagement
+              codes={codes}
+              codeType="place_category"
+              onReload={handleReloadCodes}
+            />
+          )}
+          {selectedCodeType === 'tags' && (
+            <TagGroupsManagement
+              tagCodesByGroup={tagCodesByGroup}
+              onReload={handleReloadCodes}
+            />
+          )}
+        </>
+      )}
       {activeTab === 'password' && <PasswordChangeForm />}
-      {activeTab === 'codes' && <CommonCodesManagement categories={categories} onReload={loadCategories} />}
     </div>
   )
 }
@@ -150,11 +230,140 @@ const PasswordChangeForm = () => {
   )
 }
 
-const CommonCodesManagement = ({ categories, onReload }) => {
+const TagGroupsManagement = ({ tagCodesByGroup, onReload }) => {
+  const [showForm, setShowForm] = useState(false)
+  const [editingCode, setEditingCode] = useState(null)
+  const [addCodeType, setAddCodeType] = useState(null)
+
+  const handleAddNew = (codeType) => {
+    setEditingCode(null)
+    setAddCodeType(codeType)
+    setShowForm(true)
+  }
+
+  const handleEdit = (code) => {
+    setEditingCode(code)
+    setAddCodeType(null)
+    setShowForm(true)
+  }
+
+  const handleDeleteClick = (code) => {
+    const firstMsg = `"${code.code_label}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
+    if (window.confirm(firstMsg)) {
+      if (window.confirm('정말 삭제하시겠습니까?')) {
+        doDelete(code)
+      }
+    }
+  }
+
+  const doDelete = async (code) => {
+    const result = await deleteCommonCode(code.id)
+    if (result.success) onReload()
+    else alert(result.error || '삭제에 실패했습니다.')
+  }
+
+  const handleToggleActive = async (code) => {
+    const result = await saveCommonCode({ ...code, is_active: !code.is_active }, code.id)
+    if (result.success) onReload()
+    else alert(result.error || '상태 변경에 실패했습니다.')
+  }
+
+  const formCodeType = editingCode ? editingCode.code_type : addCodeType
+
+  return (
+    <div className="bg-gray-900 rounded-lg p-6">
+      <h3 className="text-lg font-semibold mb-4">태그 관리</h3>
+
+      {showForm && formCodeType ? (
+        <CommonCodeForm
+          code={editingCode}
+          codeType={formCodeType}
+          onClose={() => {
+            setShowForm(false)
+            setEditingCode(null)
+            setAddCodeType(null)
+          }}
+          onSuccess={() => {
+            setShowForm(false)
+            setEditingCode(null)
+            setAddCodeType(null)
+            onReload()
+          }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {TAG_GROUP_CONFIG.map((group) => (
+            <div key={group.key} className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-[#ADFF2F]">{group.label}</h4>
+                <button
+                  type="button"
+                  onClick={() => handleAddNew(group.codeType)}
+                  className="px-2 py-1 bg-[#ADFF2F]/20 hover:bg-[#ADFF2F]/30 text-[#ADFF2F] rounded text-xs font-medium"
+                >
+                  + 추가
+                </button>
+              </div>
+              <div className="space-y-2 min-h-[80px]">
+                {(tagCodesByGroup[group.key] || []).length === 0 ? (
+                  <p className="text-xs text-gray-500 py-2">등록된 태그가 없습니다.</p>
+                ) : (
+                  (tagCodesByGroup[group.key] || []).map((item) => (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between p-2 rounded text-sm ${
+                        item.is_active ? 'bg-gray-700/50' : 'bg-gray-700/30 opacity-60'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{item.code_label}</p>
+                        <p className="text-xs text-gray-500 truncate">{item.code_value}</p>
+                        {!item.is_active && (
+                          <span className="text-[10px] text-gray-400">비활성</span>
+                        )}
+                      </div>
+                      <div className="flex gap-1 shrink-0 ml-1">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleActive(item)}
+                          className="px-1.5 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-[10px]"
+                          title={item.is_active ? '비활성화' : '활성화'}
+                        >
+                          {item.is_active ? '숨김' : '표시'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(item)}
+                          className="px-1.5 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-[10px]"
+                        >
+                          수정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClick(item)}
+                          className="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded text-[10px]"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const CommonCodesManagement = ({ codes, codeType, onReload }) => {
   const [showForm, setShowForm] = useState(false)
   const [editingCode, setEditingCode] = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [codeToDelete, setCodeToDelete] = useState(null)
+  const isPlaceTag = PLACE_TAG_TYPES.includes(codeType)
 
   const handleAddNew = () => {
     setEditingCode(null)
@@ -166,16 +375,32 @@ const CommonCodesManagement = ({ categories, onReload }) => {
     setShowForm(true)
   }
 
-  const handleDelete = async (code) => {
-    if (window.confirm(`"${code.code_label}" 카테고리를 삭제하시겠습니까?`)) {
-      const result = await deleteCommonCode(code.id)
-      if (result.success) {
-        onReload()
+  const handleDeleteClick = (code) => {
+    const firstMsg = isPlaceTag
+      ? `"${code.code_label}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
+      : `"${code.code_label}" 카테고리를 삭제하시겠습니까?`
+    if (window.confirm(firstMsg)) {
+      if (isPlaceTag) {
+        const secondMsg = '정말 삭제하시겠습니까?'
+        if (window.confirm(secondMsg)) {
+          doDelete(code)
+        }
       } else {
-        alert(result.error || '삭제에 실패했습니다.')
+        doDelete(code)
       }
     }
   }
+
+  const doDelete = async (code) => {
+    const result = await deleteCommonCode(code.id)
+    if (result.success) {
+      onReload()
+    } else {
+      alert(result.error || '삭제에 실패했습니다.')
+    }
+  }
+
+  const handleDelete = handleDeleteClick
 
   const handleToggleActive = async (code) => {
     const result = await saveCommonCode(
@@ -195,18 +420,21 @@ const CommonCodesManagement = ({ categories, onReload }) => {
   return (
     <div className="bg-gray-900 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">장소 카테고리 관리</h3>
+        <h3 className="text-lg font-semibold">
+          {CODE_TYPE_OPTIONS.find(o => o.value === codeType)?.label || '공통코드'} 관리
+        </h3>
         <button
           className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors text-sm font-semibold"
           onClick={handleAddNew}
         >
-          + 카테고리 추가
+          + {isPlaceTag ? '태그' : '카테고리'} 추가
         </button>
       </div>
 
       {showForm ? (
         <CommonCodeForm
           code={editingCode}
+          codeType={codeType}
           onClose={() => {
             setShowForm(false)
             setEditingCode(null)
@@ -219,8 +447,8 @@ const CommonCodesManagement = ({ categories, onReload }) => {
         />
       ) : (
         <div className="space-y-2">
-          {categories.length > 0 ? (
-            categories.map((category) => (
+          {codes.length > 0 ? (
+            codes.map((category) => (
               <div
                 key={category.id}
                 className={`flex items-center justify-between p-3 rounded-lg ${
@@ -264,7 +492,7 @@ const CommonCodesManagement = ({ categories, onReload }) => {
               </div>
             ))
           ) : (
-            <p className="text-gray-400 text-center py-8">등록된 카테고리가 없습니다.</p>
+            <p className="text-gray-400 text-center py-8">등록된 항목이 없습니다.</p>
           )}
         </div>
       )}
@@ -272,17 +500,19 @@ const CommonCodesManagement = ({ categories, onReload }) => {
   )
 }
 
-const CommonCodeForm = ({ code, onClose, onSuccess }) => {
+const CommonCodeForm = ({ code, codeType, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
-    code_type: 'place_category',
+    code_type: codeType || code?.code_type || 'place_category',
     code_value: code?.code_value || '',
     code_label: code?.code_label || '',
-    display_order: code?.display_order || 0,
+    display_order: code?.display_order ?? 0,
     is_active: code?.is_active !== undefined ? code.is_active : true,
   })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+
+  const isPlaceTag = PLACE_TAG_TYPES.includes(formData.code_type)
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -293,7 +523,6 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
     setError('')
     setSuccess('')
 
-    // Validation
     if (!formData.code_value.trim()) {
       setError('코드 값(code_value)을 입력해주세요.')
       return
@@ -302,6 +531,13 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
     if (!formData.code_label.trim()) {
       setError('코드명을 입력해주세요.')
       return
+    }
+
+    if (code && isPlaceTag) {
+      const confirmed = window.confirm(
+        '태그명을 수정하면 이 태그를 사용 중인 모든 장소에 반영됩니다. 계속하시겠습니까?'
+      )
+      if (!confirmed) return
     }
 
     setIsSaving(true)
@@ -313,7 +549,7 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
         throw new Error(result.error || '카테고리 저장에 실패했습니다.')
       }
 
-      setSuccess(code ? '카테고리가 수정되었습니다.' : '카테고리가 등록되었습니다.')
+      setSuccess(code ? '수정되었습니다.' : '등록되었습니다.')
       setTimeout(() => {
         onSuccess()
       }, 1000)
@@ -328,7 +564,7 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <h4 className="text-lg font-semibold mb-4">
-        {code ? '카테고리 수정' : '카테고리 추가'}
+        {code ? (isPlaceTag ? '태그 수정' : '카테고리 수정') : (isPlaceTag ? '태그 추가' : '카테고리 추가')}
       </h4>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -341,9 +577,9 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
             value={formData.code_value}
             onChange={(e) => handleInputChange('code_value', e.target.value)}
             required
-            disabled={!!code} // 수정 시 코드 값 변경 불가
+            disabled={!!code}
             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white disabled:opacity-50"
-            placeholder="예: popup_store"
+            placeholder={isPlaceTag ? '예: reservation_required' : '예: popup_store'}
           />
           {code && (
             <p className="text-xs text-gray-500 mt-1">코드 값은 수정할 수 없습니다.</p>
@@ -362,6 +598,7 @@ const CommonCodeForm = ({ code, onClose, onSuccess }) => {
             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
             placeholder="예: Pop-up Store"
           />
+          <p className="text-xs text-gray-500 mt-1">코드명이 사용자 화면에 표시됩니다.</p>
         </div>
 
         <div>
