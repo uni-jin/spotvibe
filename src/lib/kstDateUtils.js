@@ -56,6 +56,41 @@ export function formatKstDisplay(dbValue) {
 }
 
 /**
+ * DB 저장값을 날짜만 표시용 "YYYY. MM. DD"로 (시간 미입력 시 사용자 화면용)
+ */
+export function formatKstDisplayDateOnly(dbValue) {
+  if (!dbValue) return ''
+  const s = typeof dbValue === 'string' ? dbValue : String(dbValue)
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return ''
+  const [, y, m, d] = match
+  return `${y}. ${m}. ${d}`
+}
+
+/**
+ * 노출기간이 "날짜만" 지정된 구간인지 (시작 00:00, 종료 23:59:59 → 사용자 화면에서 날짜만 표시)
+ */
+export function isDateOnlyPeriod(startKst, endKst) {
+  if (!startKst && !endKst) return false
+
+  const getTime = (v) => {
+    if (!v) return null
+    const form = dbKstToFormString(v) // "YYYY-MM-DDTHH:mm"
+    if (!form) return null
+    const [, timePart] = form.split('T')
+    return timePart || '00:00'
+  }
+
+  const startTime = getTime(startKst)
+  const endTime = getTime(endKst)
+
+  const startIsMidnight = !startTime || startTime.startsWith('00:00')
+  const endIsEndOfDay = !endTime || endTime.startsWith('23:59')
+
+  return startIsMidnight && endIsEndOfDay
+}
+
+/**
  * DB 저장값(한국 시간 문자열)을 Date(instant)로 해석 — 노출 상태 비교용
  * "2026-02-14 18:30:00" (KST) → 그 순간의 Date
  */
