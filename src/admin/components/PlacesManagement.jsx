@@ -474,6 +474,15 @@ function initialDisplayPeriods(place) {
   return []
 }
 
+// 오늘 날짜(브라우저 기준)를 "YYYY-MM-DD" 문자열로 반환
+function getTodayDateString() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeletePlace }) => {
   const initialPeriods = initialDisplayPeriods(place)
   const [formData, setFormData] = useState({
@@ -528,16 +537,29 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   const setDisplayPeriod = (index, key, value) => {
     setFormData((prev) => {
       const next = [...(prev.display_periods || [])]
-      if (!next[index]) next[index] = { startDate: '', startTime: '', endDate: '', endTime: '' }
-      next[index] = { ...next[index], [key]: value }
+      const base = next[index] || { startDate: '', startTime: '', endDate: '', endTime: '' }
+      let updated = { ...base, [key]: value }
+
+      // 시작일이 선택되면, 종료일이 비어 있거나 더 이전이면 시작일로 맞춰줌
+      if (key === 'startDate' && value) {
+        if (!updated.endDate || updated.endDate < value) {
+          updated = { ...updated, endDate: value }
+        }
+      }
+
+      next[index] = updated
       return { ...prev, display_periods: next }
     })
   }
 
   const addDisplayPeriod = () => {
+    const today = getTodayDateString()
     setFormData((prev) => ({
       ...prev,
-      display_periods: [...(prev.display_periods || []), { startDate: '', startTime: '', endDate: '', endTime: '' }],
+      display_periods: [
+        ...(prev.display_periods || []),
+        { startDate: today, startTime: '', endDate: today, endTime: '' },
+      ],
       unlimited_display: false,
     }))
   }
@@ -859,15 +881,15 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
 
         {/* Description & Links */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+          <div className="flex flex-col h-full">
             <label className="block text-sm font-medium mb-2 text-gray-300">
               설명 <span className="text-gray-500 text-xs">(선택)</span>
             </label>
             <textarea
               value={formData.description}
               onChange={(e) => handleInputChange('description', e.target.value)}
-              rows={4}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
+              rows={6}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none flex-1 min-h-[160px]"
               placeholder="장소에 대한 설명을 입력하세요..."
             />
           </div>
@@ -1027,10 +1049,15 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                 checked={formData.unlimited_display}
                 onChange={(e) => {
                   const checked = e.target.checked
+                  const today = getTodayDateString()
                   setFormData((prev) => ({
                     ...prev,
                     unlimited_display: checked,
-                    display_periods: checked ? [] : (prev.display_periods?.length ? prev.display_periods : [{ startDate: '', startTime: '', endDate: '', endTime: '' }]),
+                    display_periods: checked
+                      ? []
+                      : (prev.display_periods?.length
+                          ? prev.display_periods
+                          : [{ startDate: today, startTime: '', endDate: today, endTime: '' }]),
                   }))
                 }}
                 className="w-4 h-4 rounded bg-gray-800 border-gray-700 text-[#ADFF2F] focus:ring-[#ADFF2F]"
@@ -1066,6 +1093,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                         <input
                           type="date"
                           value={period.endDate || ''}
+                          min={period.startDate || ''}
                           onChange={(e) => setDisplayPeriod(index, 'endDate', e.target.value)}
                           className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
                         />
