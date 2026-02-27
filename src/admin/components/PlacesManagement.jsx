@@ -518,6 +518,47 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   )
   const [mapZoom, setMapZoom] = useState(place?.lat && place?.lng ? 16 : 13)
 
+  const handleAddressSearch = async () => {
+    const q = addressQuery.trim()
+    if (!q) {
+      setGeoMessage('검색할 주소를 입력하세요.')
+      return
+    }
+    try {
+      setGeoMessage('주소를 찾는 중입니다...')
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
+      )
+      if (!res.ok) {
+        throw new Error('주소 검색에 실패했습니다.')
+      }
+      const data = await res.json()
+      if (!Array.isArray(data) || data.length === 0) {
+        setGeoMessage('검색 결과가 없습니다. 주소를 다시 확인해주세요.')
+        return
+      }
+      const first = data[0]
+      const lat = parseFloat(first.lat)
+      const lng = parseFloat(first.lon)
+      if (isNaN(lat) || isNaN(lng)) {
+        setGeoMessage('검색 결과에서 좌표를 해석할 수 없습니다.')
+        return
+      }
+      setMarkerPosition([lat, lng])
+      setMapCenter([lat, lng])
+      setMapZoom(17)
+      setFormData((prev) => ({
+        ...prev,
+        lat: lat.toString(),
+        lng: lng.toString(),
+      }))
+      setGeoMessage('주소를 기준으로 위치를 설정했습니다.')
+    } catch (err) {
+      console.error('주소 검색 오류:', err)
+      setGeoMessage('주소 검색 중 오류가 발생했습니다.')
+    }
+  }
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     
@@ -606,12 +647,6 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           lat: lat.toString(),
           lng: lng.toString(),
         }))
-        // 현재 zoom 레벨 유지
-        setMapZoom(map.getZoom())
-      },
-      zoomend: () => {
-        // 사용자가 확대/축소할 때 zoom 상태 업데이트
-        setMapZoom(map.getZoom())
       },
     })
     return null
@@ -825,52 +860,19 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                   setAddressQuery(e.target.value)
                   setGeoMessage('')
                 }}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    await handleAddressSearch()
+                  }
+                }}
                 placeholder="예: 서울 성동구 성수이로 89"
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
               />
             </div>
             <button
               type="button"
-              onClick={async () => {
-                const q = addressQuery.trim()
-                if (!q) {
-                  setGeoMessage('검색할 주소를 입력하세요.')
-                  return
-                }
-                try {
-                  setGeoMessage('주소를 찾는 중입니다...')
-                  const res = await fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
-                  )
-                  if (!res.ok) {
-                    throw new Error('주소 검색에 실패했습니다.')
-                  }
-                  const data = await res.json()
-                  if (!Array.isArray(data) || data.length === 0) {
-                    setGeoMessage('검색 결과가 없습니다. 주소를 다시 확인해주세요.')
-                    return
-                  }
-                  const first = data[0]
-                  const lat = parseFloat(first.lat)
-                  const lng = parseFloat(first.lon)
-                  if (isNaN(lat) || isNaN(lng)) {
-                    setGeoMessage('검색 결과에서 좌표를 해석할 수 없습니다.')
-                    return
-                  }
-                  setMarkerPosition([lat, lng])
-                  setMapCenter([lat, lng])
-                  setMapZoom(17)
-                  setFormData((prev) => ({
-                    ...prev,
-                    lat: lat.toString(),
-                    lng: lng.toString(),
-                  }))
-                  setGeoMessage('주소를 기준으로 위치를 설정했습니다.')
-                } catch (err) {
-                  console.error('주소 검색 오류:', err)
-                  setGeoMessage('주소 검색 중 오류가 발생했습니다.')
-                }
-              }}
+              onClick={handleAddressSearch}
               className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors text-sm font-semibold"
             >
               검색

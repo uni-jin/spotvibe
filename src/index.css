@@ -75,11 +75,29 @@ body {
   border: none !important;
 }
 
-/* Leaflet Map Wrapper (공통) */
+/* Leaflet Map Wrapper (관리자 지도: 라이트 톤) */
 .dark-map .leaflet-container {
   background-color: #f3f4f6;
   height: 100% !important;
   width: 100% !important;
+}
+
+/* 사용자 화면 지도: 다크 배경 */
+.user-map-dark .leaflet-container {
+  background-color: #020617;
+  height: 100% !important;
+  width: 100% !important;
+}
+
+/* 사용자 지도 저작권 띠를 하단 메뉴 위 안전 영역으로 올리기 */
+.user-map-dark .leaflet-control-attribution {
+  right: 0.75rem;
+  bottom: 0.4rem; /* 하단 메뉴 바로 위에 거의 붙도록 */
+  background-color: rgba(15, 23, 42, 0.85);
+  color: #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
 }
 
 /* Custom Marker Styles */

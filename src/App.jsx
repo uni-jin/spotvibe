@@ -2488,27 +2488,44 @@ function App() {
     return null
   }
 
-  // 지도 우측 하단: 현재 위치로 이동 버튼
-  function MapLocationButton({ userLocation }) {
+  // 지도 우측 하단 컨트롤 (Discover only 토글 + 현재 위치로 이동)
+  function MapControls({ userLocation, mapAdminOnly, onToggleDiscoverOnly }) {
     const map = useMap()
-    if (!userLocation) return null
     return (
-      <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 1000 }}>
+      <div className="absolute right-3 bottom-12 z-[1100] flex flex-col gap-2">
+        {/* 현재 위치로 이동 (위쪽) */}
+        {userLocation && (
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                map.flyTo([userLocation.lat, userLocation.lng], map.getZoom() || 16, { duration: 0.5 })
+              } catch {
+                map.setView([userLocation.lat, userLocation.lng], map.getZoom() || 16)
+              }
+            }}
+            className="flex items-center justify-center w-10 h-10 rounded-full bg-black/80 border border-[#ADFF2F]/50 text-[#ADFF2F] shadow-lg hover:bg-[#ADFF2F]/20 transition-colors"
+            aria-label="현재 위치로 이동"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
+            </svg>
+          </button>
+        )}
+
+        {/* Discover only 토글 (아래쪽, 저작권 위) */}
         <button
           type="button"
-          onClick={() => {
-            try {
-              map.flyTo([userLocation.lat, userLocation.lng], map.getZoom() || 16, { duration: 0.5 })
-            } catch {
-              map.setView([userLocation.lat, userLocation.lng], map.getZoom() || 16)
-            }
-          }}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-black/80 border border-[#ADFF2F]/50 text-[#ADFF2F] shadow-lg hover:bg-[#ADFF2F]/20 transition-colors"
-          aria-label="현재 위치로 이동"
+          onClick={onToggleDiscoverOnly}
+          className={`flex items-center justify-center w-10 h-10 rounded-full border text-xs font-semibold shadow-lg transition-colors border-red-500 ${
+            mapAdminOnly
+              ? 'bg-red-500 text-black'
+              : 'bg-black/70 text-red-400 hover:bg-red-500/10'
+          }`}
+          aria-pressed={mapAdminOnly}
+          aria-label="Discover only 토글"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
-          </svg>
+          <span className="text-sm leading-none">★</span>
         </button>
       </div>
     )
@@ -2666,21 +2683,6 @@ function App() {
                 </p>
               </div>
               <div className="flex flex-col items-end gap-1">
-                <label className="inline-flex items-center gap-1 text-xs text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={mapAdminOnly}
-                    onChange={(e) => {
-                      setMapAdminOnly(e.target.checked)
-                      // 토글 시 클러스터 상태 리셋
-                      setMapZoom(1)
-                      setSelectedCluster(null)
-                      setSelectedPin(null)
-                    }}
-                    className="w-3 h-3 rounded bg-gray-900 border-gray-600 text-[#ADFF2F]"
-                  />
-                  <span>Discover only</span>
-                </label>
                 {mapZoom === 2 && (
                   <button
                     onClick={() => {
@@ -2737,14 +2739,13 @@ function App() {
             center={mapCenter}
             zoom={16}
             style={{ height: '100%', width: '100%', zIndex: 1 }}
-            className="dark-map"
+            className="user-map-dark"
             scrollWheelZoom={true}
           >
-            {/* 다크 테마 타일 레이어 */}
+            {/* 사용자 화면: 고대비 다크 테마 타일 (OSM 기반, MapTiler) */}
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              className="dark-tiles"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a>'
+              url={`https://api.maptiler.com/maps/streets-v2-dark/256/{z}/{x}/{y}.png?key=${import.meta.env.VITE_MAPTILER_KEY}`}
             />
 
             {/* 탭 전환 후 컨테이너 크기 재계산 → 타일 로드 유도 (검정 화면 방지) */}
@@ -2782,10 +2783,17 @@ function App() {
               <UserLocationMarker location={userLocation} />
             )}
 
-            {/* 우측 하단: 현재 위치로 이동 버튼 */}
-            {userLocation && (
-              <MapLocationButton userLocation={userLocation} />
-            )}
+            {/* 우측 하단 컨트롤: Discover only 토글 + 현재 위치 이동 */}
+            <MapControls
+              userLocation={userLocation}
+              mapAdminOnly={mapAdminOnly}
+              onToggleDiscoverOnly={() => {
+                setMapAdminOnly((prev) => !prev)
+                setMapZoom(1)
+                setSelectedCluster(null)
+                setSelectedPin(null)
+              }}
+            />
 
             {/* 마커 표시 (피드 포스트 + 관리자 장소 모두 커스텀 이미지 마커·클러스터로 표시) */}
             {mapItems.length > 0 ? (
