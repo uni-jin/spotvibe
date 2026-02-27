@@ -1360,6 +1360,7 @@ function App() {
   const [selectedDiscoverSpot, setSelectedDiscoverSpot] = useState(null)
   const [discoverDetailFrom, setDiscoverDetailFrom] = useState(null) // 'discover' | 'home' — 장소 상세 진입 경로
   const [viewBeforePostDetail, setViewBeforePostDetail] = useState(null) // 포스트 상세 진입 전 뷰 (뒤로가기용)
+  const [mapFocusSpot, setMapFocusSpot] = useState(null) // 지도에서 특정 Discover 장소로 포커스 이동용
   const viewBeforePostDetailRef = useRef(null)
 
   const handleNavClick = (viewId) => {
@@ -1430,7 +1431,9 @@ function App() {
                 {region.active && (
                   <div className="mt-3 pt-3 border-t border-[#ADFF2F]/30 flex items-center gap-6 text-sm text-gray-400">
                     <span className="flex items-center gap-1.5">
-                      <span className="text-[#ADFF2F] font-semibold tabular-nums">{hotSpots.length}</span>
+                      <span className="text-[#ADFF2F] font-semibold tabular-nums">
+                        {hotSpots.filter((spot) => spot.type === 'popup_store').length}
+                      </span>
                       <span>Discover</span>
                     </span>
                     <span className="flex items-center gap-1.5">
@@ -1773,7 +1776,7 @@ function App() {
             </div>
 
             {/* Info block: D-day, Vibe, 제목, 거리, 기간, 설명, 해시태그, 링크/전화 */}
-            <div className="px-4 py-4 space-y-2">
+            <div className="px-4 py-4 space-y-3">
               {/* 상단 메타 정보: D-day, Vibe, 제목, 거리 */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
@@ -1800,6 +1803,26 @@ function App() {
                   )}
                 </div>
               </div>
+
+              {/* 지도에서 보기 버튼 */}
+              {spot.lat && spot.lng && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapFocusSpot(spot)
+                      setSelectedDiscoverSpot(spot)
+                      setDiscoverDetailFrom('home')
+                      setCurrentView('map')
+                      setMapAdminOnly(true)
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
+                  >
+                    <span className="text-sm">🗺️</span>
+                    <span>Map</span>
+                  </button>
+                </div>
+              )}
 
               {/* 노출 기간 */}
               {formatDisplayPeriodForSpot(spot) && (
@@ -2460,33 +2483,7 @@ function App() {
     return null
   }
 
-  // 클러스터 선택 시 펼쳐진 영역으로 자동 확대·이동 (지도 준비된 뒤에만 실행)
-  function MapFitToCluster({ selectedCluster, mapZoom }) {
-    const map = useMap()
-    useEffect(() => {
-      if (mapZoom !== 2 || !selectedCluster?.posts?.length) return
-      const posts = selectedCluster.posts
-      const points = posts
-        .map((p) => p.metadata?.lat != null && p.metadata?.lng != null && [p.metadata.lat, p.metadata.lng])
-        .filter(Boolean)
-      if (points.length === 0) return
-      const run = () => {
-        try {
-          const el = map.getContainer()
-          if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return
-          if (points.length === 1) {
-            map.flyTo(points[0], 17, { duration: 0.5 })
-            return
-          }
-          const bounds = L.latLngBounds(points)
-          map.fitBounds(bounds, { padding: [24, 24], maxZoom: 18 })
-        } catch (_) {}
-      }
-      const t = setTimeout(run, 200)
-      return () => clearTimeout(t)
-    }, [selectedCluster, mapZoom, map])
-    return null
-  }
+  // (사용 안 함) MapFitToCluster는 클러스터 클릭 시 자동 이동이 과하게 반복되어 제거되었습니다.
 
   // 지도 우측 하단 컨트롤 (Discover only 토글 + 현재 위치로 이동)
   function MapControls({ userLocation, mapAdminOnly, onToggleDiscoverOnly }) {
@@ -2529,6 +2526,24 @@ function App() {
         </button>
       </div>
     )
+  }
+
+  // Discover 상세에서 "지도에서 보기"로 넘어온 경우, 해당 장소로 한 번만 포커스 이동
+  function MapFocusSpot({ spot, onDone }) {
+    const map = useMap()
+    useEffect(() => {
+      if (!spot || !spot.lat || !spot.lng) return
+      const target = [spot.lat, spot.lng]
+      try {
+        map.flyTo(target, 17, { duration: 0.5 })
+      } catch {
+        map.setView(target, 17)
+      }
+      if (onDone) {
+        onDone()
+      }
+    }, [spot, map, onDone])
+    return null
   }
 
   // 사용자 현재 위치 마커 컴포넌트 (반짝이는 pulse 애니메이션, 자동 이동 없음)
@@ -2645,8 +2660,16 @@ function App() {
         ? vibePosts.filter((post) => (post.category_type || 'other') === selectedHotSpotCategory)
         : vibePosts)
 
+    // 지도에는 진행 중/시작 예정/무제한인 장소만 노출
+    const activeHotSpotsForMap = hotSpots.filter(
+      (spot) =>
+        spot.displayStatus === 'active' ||
+        spot.displayStatus === 'scheduled' ||
+        spot.displayStatus === 'unlimited'
+    )
+
     // 관리자 장소를 항상 피드와 동일한 클러스터/커스텀 이미지 마커(빨간 테두리)로 표시하기 위한 fake post 목록
-    const placeFakePosts = hotSpots
+    const placeFakePosts = activeHotSpotsForMap
       .filter((spot) => spot.lat && spot.lng)
       .filter((spot) => (selectedHotSpotCategory ? spot.type === selectedHotSpotCategory : true))
       .map((spot) => ({
@@ -2681,20 +2704,6 @@ function App() {
                 <p className="text-xs text-gray-400 mt-0.5">
                   {vibePosts.filter((p) => p.metadata).length} active signals
                 </p>
-              </div>
-              <div className="flex flex-col items-end gap-1">
-                {mapZoom === 2 && (
-                  <button
-                    onClick={() => {
-                      setMapZoom(1)
-                      setSelectedCluster(null)
-                      setSelectedPin(null)
-                    }}
-                    className="px-3 py-1.5 text-xs font-semibold bg-[#ADFF2F]/20 text-[#ADFF2F] rounded-lg border border-[#ADFF2F]/50 hover:bg-[#ADFF2F]/30"
-                  >
-                    ← Back
-                  </button>
-                )}
               </div>
             </div>
             {/* 카테고리 필터 (지도 상단) */}
@@ -2764,9 +2773,6 @@ function App() {
             {/* 지도 확대 수준 동기화 → 확대 시 클러스터가 개별 마커로 펼쳐짐 */}
             <MapZoomSync onZoomChange={setLeafletZoom} />
 
-            {/* 클러스터 선택 시 펼쳐진 장소들이 보이도록 자동 확대·이동 */}
-            <MapFitToCluster selectedCluster={selectedCluster} mapZoom={mapZoom} />
-
             {/* 펼쳐진 상태에서 축소하면 선택 해제 후 다시 뭉쳐지게 */}
             <MapClusterCollapseOnZoomOut
               mapZoom={mapZoom}
@@ -2782,6 +2788,12 @@ function App() {
             {userLocation && (
               <UserLocationMarker location={userLocation} />
             )}
+
+            {/* Discover 상세에서 넘어온 경우 해당 장소로 포커스 */}
+            <MapFocusSpot
+              spot={mapFocusSpot}
+              onDone={() => setMapFocusSpot(null)}
+            />
 
             {/* 우측 하단 컨트롤: Discover only 토글 + 현재 위치 이동 */}
             <MapControls
