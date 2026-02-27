@@ -75,24 +75,11 @@ body {
   border: none !important;
 }
 
-/* Leaflet Dark Theme */
+/* Leaflet Map Wrapper (공통) */
 .dark-map .leaflet-container {
-  background-color: #000;
-  filter: brightness(0.8) contrast(1.2);
+  background-color: #f3f4f6;
   height: 100% !important;
   width: 100% !important;
-}
-
-.dark-map .leaflet-tile-container img {
-  filter: invert(1) hue-rotate(180deg) brightness(0.6) contrast(1.2);
-}
-
-.dark-map .leaflet-map-pane {
-  height: 100% !important;
-}
-
-.dark-map .leaflet-tile-pane {
-  height: 100% !important;
 }
 
 /* Custom Marker Styles */

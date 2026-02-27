@@ -504,6 +504,8 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [addressQuery, setAddressQuery] = useState('')
+  const [geoMessage, setGeoMessage] = useState('')
   
   // Map state
   const [markerPosition, setMarkerPosition] = useState(
@@ -612,6 +614,20 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         setMapZoom(map.getZoom())
       },
     })
+    return null
+  }
+
+  // 마커 위치로 지도 이동 (주소 검색 등으로 마커가 갱신되면 해당 위치로 이동)
+  const MapFlyToMarker = ({ position }) => {
+    const map = useMap()
+    useEffect(() => {
+      if (!position) return
+      try {
+        map.flyTo(position, map.getZoom() || 16, { duration: 0.5 })
+      } catch {
+        map.setView(position, map.getZoom() || 16)
+      }
+    }, [position, map])
     return null
   }
   
@@ -797,8 +813,77 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           <label className="block text-sm font-medium mb-2 text-gray-300">
             위치 설정 <span className="text-gray-500 text-xs">(선택)</span>
           </label>
+
+          {/* 주소 검색 */}
+          <div className="mb-3 flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs text-gray-400 mb-1">주소 검색 (도로명/지번)</label>
+              <input
+                type="text"
+                value={addressQuery}
+                onChange={(e) => {
+                  setAddressQuery(e.target.value)
+                  setGeoMessage('')
+                }}
+                placeholder="예: 서울 성동구 성수이로 89"
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                const q = addressQuery.trim()
+                if (!q) {
+                  setGeoMessage('검색할 주소를 입력하세요.')
+                  return
+                }
+                try {
+                  setGeoMessage('주소를 찾는 중입니다...')
+                  const res = await fetch(
+                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
+                  )
+                  if (!res.ok) {
+                    throw new Error('주소 검색에 실패했습니다.')
+                  }
+                  const data = await res.json()
+                  if (!Array.isArray(data) || data.length === 0) {
+                    setGeoMessage('검색 결과가 없습니다. 주소를 다시 확인해주세요.')
+                    return
+                  }
+                  const first = data[0]
+                  const lat = parseFloat(first.lat)
+                  const lng = parseFloat(first.lon)
+                  if (isNaN(lat) || isNaN(lng)) {
+                    setGeoMessage('검색 결과에서 좌표를 해석할 수 없습니다.')
+                    return
+                  }
+                  setMarkerPosition([lat, lng])
+                  setMapCenter([lat, lng])
+                  setMapZoom(17)
+                  setFormData((prev) => ({
+                    ...prev,
+                    lat: lat.toString(),
+                    lng: lng.toString(),
+                  }))
+                  setGeoMessage('주소를 기준으로 위치를 설정했습니다.')
+                } catch (err) {
+                  console.error('주소 검색 오류:', err)
+                  setGeoMessage('주소 검색 중 오류가 발생했습니다.')
+                }
+              }}
+              className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors text-sm font-semibold"
+            >
+              검색
+            </button>
+          </div>
+          {geoMessage && (
+            <p className="text-xs mb-2 text-gray-400">
+              {geoMessage}
+            </p>
+          )}
+
           <p className="text-xs text-gray-400 mb-2">
-            지도를 클릭하여 위치를 선택하거나, 아래 입력란에 직접 좌표를 입력할 수 있습니다.
+            지도를 클릭하여 위치를 선택하거나, 주소 검색 또는 아래 입력란에 직접 좌표를 입력할 수 있습니다.
           </p>
           
           {/* Map */}
@@ -824,6 +909,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                   className="dark-tiles"
                 />
                 <MapClickHandler />
+                {markerPosition && <MapFlyToMarker position={markerPosition} />}
                 {markerPosition && (
                   <Marker
                     position={markerPosition}
