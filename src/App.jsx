@@ -11,15 +11,15 @@ import { formatUtcAsKstDisplay, formatKstDisplayDateOnly, isDateOnlyPeriod, getT
 
 // 간단 i18n 문자열
 const I18N = {
-  navDiscover: { ko: '디스커버', en: 'Discover' },
+  navDiscover: { ko: '발견', en: 'Discover' },
   navMap: { ko: '지도', en: 'Map' },
   navMy: { ko: '마이', en: 'My' },
-  discoverTitle: { ko: '디스커버', en: 'Discover' },
+  discoverTitle: { ko: '발견', en: 'Discover' },
   discoverSortDistance: { ko: '거리순', en: 'Distance' },
   discoverSortLatest: { ko: '최신순', en: 'Latest' },
   discoverSortHot: { ko: '인기순', en: 'Hot' },
   discoverNoSpots: { ko: '현재 노출 중인 팝업이 없습니다.', en: 'No pop-up stores available.' },
-  mapTitle: { ko: '라이브 레이더', en: 'Live Radar' },
+  mapTitle: { ko: '팝업 지도', en: 'Pop-up Map' },
   mapActiveSignals: { ko: '위치 정보가 있는 포스트', en: 'active signals' },
   mapNoLocation: { ko: '위치 데이터가 없습니다.', en: 'No location data available' },
 
@@ -1936,7 +1936,7 @@ function App() {
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
-                {I18N.discoverTitle[lang]} <span className="text-[#ADFF2F]">✨</span>
+                {I18N.discoverTitle[lang]}
               </h1>
               <div className="flex items-center gap-2">
                 <button
@@ -2333,7 +2333,7 @@ function App() {
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
-                Live Vibe Stream <span className="text-[#ADFF2F]">🔥</span>
+                Live Vibe Stream
               </h1>
               {selectedRegion && (
                 <button
@@ -2903,7 +2903,7 @@ function App() {
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
-                {I18N.mapTitle[lang]} <span className="text-[#ADFF2F]">📡</span>
+                {I18N.mapTitle[lang]}
               </h1>
               <div className="flex items-center gap-2">
                 <button
@@ -3062,7 +3062,7 @@ function App() {
         <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <h1 className="text-2xl font-bold">
-              Quest <span className="text-[#ADFF2F]">🎯</span>
+              Quest
             </h1>
             <p className="text-sm text-gray-400 mt-1">
               Complete challenges and earn rewards
@@ -3089,7 +3089,7 @@ function App() {
         <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <h1 className="text-2xl font-bold">
-              My Profile <span className="text-[#ADFF2F]">👤</span>
+              My Profile
             </h1>
             <p className="text-sm text-gray-400 mt-1">
               Your activity and settings
