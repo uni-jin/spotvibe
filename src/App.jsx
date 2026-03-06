@@ -329,10 +329,12 @@ function LiveRadarNaverMap({
   return <div ref={mapRef} className="w-full h-full" />
 }
 
+const BOTTOM_NAV_HEIGHT = 88
+
 function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
   const hasPicked = Array.isArray(pickedPlaceIds) && pickedPlaceIds.length > 0
   return (
-    <div className="absolute right-3 bottom-12 z-[1100] flex flex-col gap-2">
+    <div className="absolute right-3 bottom-3 z-[1100] flex flex-col gap-2">
       {/* 픽한 장소만 보기 필터 (로그인 + 픽한 장소가 있을 때 표시) */}
       {hasPicked && (
         <button
@@ -2902,12 +2904,12 @@ function App() {
           </div>
         </div>
 
-        {/* Naver Map - 헤더(약 96px)와 BottomNav(약 89px) 사이 영역을 꽉 채움 */}
+        {/* Naver Map - 헤더(96px)와 BottomNav(88px) 사이만 차지, 하단 메뉴에 겹치지 않음 */}
         <div
-          className="absolute inset-x-0"
+          className="absolute inset-x-0 overflow-hidden"
           style={{
             top: '96px',
-            height: 'calc(100vh - 96px - 89px)',
+            height: 'calc(100vh - 96px - 88px)',
           }}
         >
           <LiveRadarNaverMap
@@ -2961,8 +2963,8 @@ function App() {
               <p>{I18N.mapNoLocation[lang]}</p>
             </div>
           )}
-          {/* 지도 저작권 (하단 메뉴 바로 위) */}
-          <div className="absolute bottom-1 right-2 z-[1000] text-[10px] text-gray-500">
+          {/* 지도 저작권 - 지도 영역 하단(하단 메뉴 바로 위)에 노출 */}
+          <div className="absolute bottom-2 right-2 z-[1000] text-[10px] text-gray-500">
             © NAVER Corp.
           </div>
         </div>
