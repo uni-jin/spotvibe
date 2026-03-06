@@ -329,12 +329,13 @@ function LiveRadarNaverMap({
   return <div ref={mapRef} className="w-full h-full" />
 }
 
-const BOTTOM_NAV_HEIGHT = 88
+/** 지도 화면에서 하단 메뉴 영역 높이(px). 메뉴·safe-area와 겹치지 않도록 여유 있게 설정 */
+const BOTTOM_NAV_HEIGHT = 100
 
 function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
   const hasPicked = Array.isArray(pickedPlaceIds) && pickedPlaceIds.length > 0
   return (
-    <div className="absolute right-3 bottom-14 z-[1100] flex flex-col gap-2">
+    <div className="absolute right-3 bottom-8 z-[1100] flex flex-col gap-2">
       {/* 픽한 장소만 보기 필터 (로그인 + 픽한 장소가 있을 때 표시) */}
       {hasPicked && (
         <button
@@ -2904,12 +2905,12 @@ function App() {
           </div>
         </div>
 
-        {/* Naver Map - 헤더(96px)·하단 메뉴(88px) 사이만 차지, 스크롤 없음 */}
+        {/* Naver Map - 헤더 아래 ~ 하단 메뉴 위까지만 차지 (bottom으로 경계 고정) */}
         <div
           className="absolute left-0 right-0 overflow-hidden"
           style={{
             top: '96px',
-            height: 'calc(100vh - 96px - 88px)',
+            bottom: `${BOTTOM_NAV_HEIGHT}px`,
           }}
         >
           <LiveRadarNaverMap
@@ -4384,7 +4385,7 @@ function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
   ]
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-gray-800 z-20">
+    <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-gray-800 z-20 pb-[env(safe-area-inset-bottom,0)]">
       <div className="max-w-[430px] mx-auto">
         <div className="grid grid-cols-3 gap-1 px-2 py-3">
           {navItems.map((item) => (
