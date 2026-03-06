@@ -334,7 +334,7 @@ const BOTTOM_NAV_HEIGHT = 88
 function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
   const hasPicked = Array.isArray(pickedPlaceIds) && pickedPlaceIds.length > 0
   return (
-    <div className="absolute right-3 bottom-3 z-[1100] flex flex-col gap-2">
+    <div className="absolute right-3 bottom-14 z-[1100] flex flex-col gap-2">
       {/* 픽한 장소만 보기 필터 (로그인 + 픽한 장소가 있을 때 표시) */}
       {hasPicked && (
         <button
@@ -2846,8 +2846,8 @@ function App() {
       : [37.5446, 127.0559] // 기본값: 성수동
 
     return (
-      <div className="min-h-screen bg-black text-white pb-24 relative overflow-hidden">
-        {/* Header - 디스커버 헤더와 동일한 높이·타이틀·버튼 스타일·간격 */}
+      <div className="fixed inset-0 h-screen w-full bg-black text-white overflow-hidden">
+        {/* Header - 고정, 스크롤 시 움직이지 않음 */}
         <div className="absolute top-0 left-0 right-0 min-h-[96px] flex flex-col justify-center bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
@@ -2904,9 +2904,9 @@ function App() {
           </div>
         </div>
 
-        {/* Naver Map - 헤더(96px)와 BottomNav(88px) 사이만 차지, 하단 메뉴에 겹치지 않음 */}
+        {/* Naver Map - 헤더(96px)·하단 메뉴(88px) 사이만 차지, 스크롤 없음 */}
         <div
-          className="absolute inset-x-0 overflow-hidden"
+          className="absolute left-0 right-0 overflow-hidden"
           style={{
             top: '96px',
             height: 'calc(100vh - 96px - 88px)',
@@ -2969,7 +2969,7 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation - 고정 */}
         <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
