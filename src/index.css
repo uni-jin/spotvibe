@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 /* 여기에 추가하고 싶은 기본 스타일을 적으세요 */
+/* 스크롤바 공간 항상 예약 → 디스커버/지도 등 화면 전환 시 헤더·하단 메뉴 가로 위치 통일 */
 html {
   scroll-behavior: auto !important;
+  scrollbar-gutter: stable;
 }
 
 body {

@@ -504,7 +504,9 @@ const CommonCodeForm = ({ code, codeType, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
     code_type: codeType || code?.code_type || 'place_category',
     code_value: code?.code_value || '',
-    code_label: code?.code_label || '',
+    // 기존 데이터(code_label)는 한국어 코드명으로 간주
+    code_label_ko: code?.code_label_ko || code?.code_label || '',
+    code_label_en: code?.code_label_en || '',
     display_order: code?.display_order ?? 0,
     is_active: code?.is_active !== undefined ? code.is_active : true,
   })
@@ -528,8 +530,8 @@ const CommonCodeForm = ({ code, codeType, onClose, onSuccess }) => {
       return
     }
 
-    if (!formData.code_label.trim()) {
-      setError('코드명을 입력해주세요.')
+    if (!formData.code_label_ko.trim()) {
+      setError('코드명(한국어)을 입력해주세요.')
       return
     }
 
@@ -586,19 +588,34 @@ const CommonCodeForm = ({ code, codeType, onClose, onSuccess }) => {
           )}
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-2 text-gray-300">
-            코드명 <span className="text-red-400">*</span>
-          </label>
-          <input
-            type="text"
-            value={formData.code_label}
-            onChange={(e) => handleInputChange('code_label', e.target.value)}
-            required
-            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-            placeholder="예: Pop-up Store"
-          />
-          <p className="text-xs text-gray-500 mt-1">코드명이 사용자 화면에 표시됩니다.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              코드명 (한국어) <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.code_label_ko}
+              onChange={(e) => handleInputChange('code_label_ko', e.target.value)}
+              required
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="예: 팝업 스토어"
+            />
+            <p className="text-xs text-gray-500 mt-1">한국어 코드명이 사용자 화면에 표시됩니다.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              코드명 (영어) <span className="text-gray-500 text-xs">(선택)</span>
+            </label>
+            <input
+              type="text"
+              value={formData.code_label_en}
+              onChange={(e) => handleInputChange('code_label_en', e.target.value)}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="예: Pop-up Store"
+            />
+            <p className="text-xs text-gray-500 mt-1">영어 코드명은 사이트 EN 모드에서 사용됩니다.</p>
+          </div>
         </div>
 
         <div>

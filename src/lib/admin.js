@@ -209,7 +209,8 @@ export const saveCommonCode = async (codeData, codeId = null) => {
     const { data, error } = await supabase.rpc('admin_save_common_code', {
       p_code_type: codeData.code_type,
       p_code_value: codeData.code_value,
-      p_code_label: codeData.code_label,
+      p_code_label_ko: codeData.code_label_ko,
+      p_code_label_en: codeData.code_label_en || null,
       p_display_order: codeData.display_order ?? 0,
       p_is_active: codeData.is_active !== undefined ? codeData.is_active : true,
       p_id: codeId || null

@@ -1,15 +1,377 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
 import Masonry from 'react-masonry-css'
 import { auth, db, supabase } from './lib/supabase'
+import { useNaverMapSdk } from './lib/useNaverMapSdk'
 import { getUserLocation, calculateDistance, formatDistance } from './utils/geolocation'
 import { getCommonCodes, getCustomPlaceNames } from './lib/admin'
 import { formatUtcAsKstDisplay, formatKstDisplayDateOnly, isDateOnlyPeriod, getTodayKSTDateKey, getKstDateKeyFromString, getCalendarDaysBetweenKeys, getCurrentOrNextPeriod } from './lib/kstDateUtils.js'
+
+// 간단 i18n 문자열
+const I18N = {
+  navDiscover: { ko: '디스커버', en: 'Discover' },
+  navMap: { ko: '지도', en: 'Map' },
+  navMy: { ko: '마이', en: 'My' },
+  discoverTitle: { ko: '디스커버', en: 'Discover' },
+  discoverSortDistance: { ko: '거리순', en: 'Distance' },
+  discoverSortLatest: { ko: '최신순', en: 'Latest' },
+  discoverSortHot: { ko: '인기순', en: 'Hot' },
+  discoverNoSpots: { ko: '현재 노출 중인 팝업이 없습니다.', en: 'No pop-up stores available.' },
+  mapTitle: { ko: '라이브 레이더', en: 'Live Radar' },
+  mapActiveSignals: { ko: '위치 정보가 있는 포스트', en: 'active signals' },
+  mapNoLocation: { ko: '위치 데이터가 없습니다.', en: 'No location data available' },
+}
+
+// 사용자 지도용 컴포넌트 — App 바깥에 두어 줌 시 setLeafletZoom 리렌더만 하고 언마운트/재마운트 되지 않도록 함 (깜빡임 방지)
+function LiveRadarNaverMap({
+  center,
+  mapItems,
+  mapFocusSpot,
+  onFocusDone,
+  userLocation,
+  onMapReady,
+  onZoomChange,
+  onMapClick,
+  onClusterClick,
+  onSpotClick,
+  onPostClick,
+  getSpotPopupHtml,
+  getPostPopupHtml,
+}) {
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+  const markersRef = useRef([])
+  const userLocMarkerRef = useRef(null)
+  const infoWindowRef = useRef(null)
+  const lastCenterRef = useRef(null)
+  const lastZoomLevelRef = useRef(null) // 정수 줌만 보고 — zoom_changed가 연속 발생해도 마커 전체 재생성은 줌 레벨이 바뀔 때만
+  const sdkReady = useNaverMapSdk()
+
+  const getClusterIconHtml = (count) =>
+    `<div style="position:relative;width:48px;height:48px;"><div style="position:absolute;inset:0;border-radius:50%;background:#ADFF2F;opacity:0.75;"></div><div style="position:relative;width:48px;height:48px;border-radius:50%;background:#ADFF2F;border:2px solid #000;display:flex;align-items:center;justify-content:center;"><span style="color:#000;font-weight:bold;font-size:12px;">${count}+</span></div></div>`
+  const getCustomIconHtml = (imageUrl, isAdmin) => {
+    const borderColor = isAdmin ? '#ef4444' : '#ADFF2F'
+    const src = imageUrl || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMzMzMzMzIi8+CjxwYXRoIGQ9Ik0zMiAyMEMyNS4zNzI2IDIwIDIwIDI1LjM3MjYgMjAgMzJDMjAgMzguNjI3NCAyNS4zNzI2IDQ0IDMyIDQ0QzM4LjYyNzQgNDQgNDQgMzguNjI3NCA0NCAzMkM0NCAyNS4zNzI2IDM4LjYyNzQgMjAgMzIgMjBaIiBmaWxsPSIjQUREQ0YyRiIvPgo8L3N2Zz4K'
+    const escaped = String(src).replace(/"/g, '&quot;')
+    return `<div style="position:relative;width:64px;height:80px;"><div style="position:relative;width:64px;height:64px;border-radius:50%;overflow:hidden;border:2px solid ${borderColor};background:#000;"><img src="${escaped}" alt="pin" style="width:100%;height:100%;object-fit:cover;" /></div><div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);"><div style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:8px solid ${borderColor};"></div></div></div>`
+  }
+
+  useEffect(() => {
+    if (!sdkReady || !window.naver?.maps || !mapRef.current || mapInstanceRef.current) return
+    const map = new naver.maps.Map(mapRef.current, {
+      center: new naver.maps.LatLng(center[0], center[1]),
+      zoom: 16,
+      minZoom: 6,
+      zoomControl: false,
+    })
+    mapInstanceRef.current = map
+    lastCenterRef.current = [center[0], center[1]]
+    lastZoomLevelRef.current = 16
+    if (onMapReady) onMapReady(map)
+    const zoomListener = naver.maps.Event.addListener(map, 'zoom_changed', () => {
+      const z = map.getZoom()
+      const zInt = Math.round(z)
+      if (onZoomChange && lastZoomLevelRef.current !== zInt) {
+        lastZoomLevelRef.current = zInt
+        onZoomChange(zInt)
+      }
+    })
+    const clickListener = naver.maps.Event.addListener(map, 'click', () => {
+      // 지도 빈 공간 클릭 시 현재 열린 팝업 닫기
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close()
+      }
+      if (onMapClick) onMapClick()
+    })
+    return () => {
+      naver.maps.Event.removeListener(zoomListener)
+      naver.maps.Event.removeListener(clickListener)
+      if (onMapReady) onMapReady(null)
+      mapInstanceRef.current = null
+      lastCenterRef.current = null
+      lastZoomLevelRef.current = null
+    }
+  }, [sdkReady])
+
+  // 중심은 “지역 선택” 등으로 실제로 바뀐 경우에만 이동. 줌 시 부모 리렌더로 center가 새 배열로 넘어와도 좌표가 같으면 setCenter 호출 안 함.
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !center || center.length < 2) return
+    const lat = center[0]
+    const lng = center[1]
+    const last = lastCenterRef.current
+    if (last && last[0] === lat && last[1] === lng) return
+    lastCenterRef.current = [lat, lng]
+    map.setCenter(new naver.maps.LatLng(lat, lng))
+  }, [center])
+
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !mapFocusSpot?.lat || !mapFocusSpot?.lng) return
+
+    const targetLatLng = new naver.maps.LatLng(mapFocusSpot.lat, mapFocusSpot.lng)
+    // 위치를 중심 근처로 이동
+    map.setCenter(targetLatLng)
+    // 너무 과하게 확대되지 않도록, 최대 확대에서 2~3단계 정도만 덜 확대
+    const maxZoom = typeof map.getMaxZoom === 'function' ? map.getMaxZoom() : 21
+    const focusZoom = Math.max(6, (maxZoom || 21) - 2)
+    map.setZoom(focusZoom)
+
+    // 지도에서 보기 버튼으로 진입한 경우, 해당 장소 팝업도 바로 열어줌
+    const spot = mapFocusSpot
+    if (spot && getSpotPopupHtml && onSpotClick) {
+      const html = getSpotPopupHtml(spot)
+      const wrap = document.createElement('div')
+      wrap.innerHTML = html
+
+      const infoWindow = infoWindowRef.current || new naver.maps.InfoWindow({ borderWidth: 0 })
+      infoWindowRef.current = infoWindow
+
+      const btn = wrap.querySelector('.naver-popup-view-detail')
+      if (btn) {
+        btn.addEventListener('click', () => {
+          onSpotClick(spot)
+          infoWindow.close()
+        })
+      }
+
+      infoWindow.setContent(wrap)
+      infoWindow.open(map, targetLatLng)
+
+      // 팝업이 화면 중앙 근처에 보이도록, 약간 위로 올려서 시야 중심에 맞춤
+      requestAnimationFrame(() => {
+        // 위로 60px 정도 이동 (단말 해상도에 따라 대략적인 값)
+        map.panBy(0, -60)
+      })
+    }
+
+    if (onFocusDone) onFocusDone()
+  }, [mapFocusSpot, onFocusDone, getSpotPopupHtml, onSpotClick])
+
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map) return
+    if (userLocMarkerRef.current) {
+      userLocMarkerRef.current.setMap(null)
+      userLocMarkerRef.current = null
+    }
+    if (userLocation?.lat != null && userLocation?.lng != null) {
+      const el = document.createElement('div')
+      el.innerHTML = `
+        <div style="position:relative;width:32px;height:32px;margin-left:-16px;margin-top:-16px;">
+          <div style="position:absolute;inset:-8px;border-radius:50%;border:2px solid rgba(59,130,246,0.7);animation:user-location-pulse 1.8s ease-out infinite;"></div>
+          <div style="position:absolute;inset:0;border-radius:50%;background:#60A5FA;border:2px solid #3B82F6;box-shadow:0 0 0 4px rgba(59,130,246,0.35);"></div>
+        </div>
+      `
+      el.className = 'user-location-marker'
+      const marker = new naver.maps.Marker({
+        position: new naver.maps.LatLng(userLocation.lat, userLocation.lng),
+        map,
+        icon: { content: el, anchor: new naver.maps.Point(16, 16) },
+        zIndex: 1000,
+      })
+      userLocMarkerRef.current = marker
+    }
+    return () => {
+      if (userLocMarkerRef.current) {
+        userLocMarkerRef.current.setMap(null)
+        userLocMarkerRef.current = null
+      }
+    }
+  }, [userLocation])
+
+  function openSameLocationCarousel(map, pos, posts, infoWindow, getSpotHtml, getPostHtml, onSpot, onPost) {
+    const n = posts.length
+    if (n === 0) return
+    let index = 0
+    const wrap = document.createElement('div')
+    wrap.style.cssText = 'min-width:200px;max-width:min(280px,calc(100vw - 32px));box-sizing:border-box;position:relative;background:transparent;'
+    const row = document.createElement('div')
+    row.style.cssText = 'display:flex;align-items:center;gap:16px;background:transparent;'
+    const prevBtn = document.createElement('button')
+    prevBtn.type = 'button'
+    prevBtn.setAttribute('aria-label', '이전')
+    prevBtn.innerHTML = '<span style="display:block;line-height:1;font-size:18px;">‹</span>'
+    prevBtn.style.cssText = 'width:36px;height:36px;border-radius:50%;border:1px solid #6b7280;background:#374151;color:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;'
+    const contentArea = document.createElement('div')
+    contentArea.className = 'carousel-content'
+    contentArea.style.flex = '1'
+    contentArea.style.minWidth = '0'
+    contentArea.style.display = 'flex'
+    contentArea.style.justifyContent = 'center'
+    const nextBtn = document.createElement('button')
+    nextBtn.type = 'button'
+    nextBtn.setAttribute('aria-label', '다음')
+    nextBtn.innerHTML = '<span style="display:block;line-height:1;font-size:18px;">›</span>'
+    nextBtn.style.cssText = 'width:36px;height:36px;border-radius:50%;border:1px solid #6b7280;background:#374151;color:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;'
+    row.appendChild(prevBtn)
+    row.appendChild(contentArea)
+    row.appendChild(nextBtn)
+    const footer = document.createElement('div')
+    footer.style.cssText = 'display:flex;justify-content:center;margin-top:12px;'
+    const counter = document.createElement('span')
+    counter.style.cssText = 'font-size:12px;color:#9ca3af;display:inline-block;padding:6px 12px;background:#111827;border-radius:8px;'
+    footer.appendChild(counter)
+    wrap.appendChild(row)
+    wrap.appendChild(footer)
+
+    function showSlide(i) {
+      index = (i + n) % n
+      const it = posts[index]
+      const isPlace = it.source === 'place' || it.spotData
+      const html = isPlace && it.spotData ? getSpotHtml(it.spotData) : getPostHtml(it)
+      contentArea.innerHTML = html
+      counter.textContent = `${index + 1} / ${n}`
+      const btn = contentArea.querySelector('.naver-popup-view-detail')
+      if (btn) {
+        btn.addEventListener('click', () => {
+          if (isPlace && it.spotData) onSpot(it.spotData)
+          else onPost(it)
+          infoWindow.close()
+        })
+      }
+    }
+
+    prevBtn.addEventListener('click', () => showSlide(index - 1))
+    nextBtn.addEventListener('click', () => showSlide(index + 1))
+    showSlide(0)
+    infoWindow.setContent(wrap)
+    infoWindow.open(map, pos)
+    requestAnimationFrame(() => {
+      let el = wrap.parentElement
+      for (let i = 0; i < 3 && el; i++) {
+        el.style.background = 'transparent'
+        el = el.parentElement
+      }
+    })
+  }
+
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !mapItems?.length) {
+      markersRef.current.forEach((m) => m.setMap(null))
+      markersRef.current = []
+      return
+    }
+    markersRef.current.forEach((m) => m.setMap(null))
+    markersRef.current = []
+
+    // InfoWindow는 한 번만 생성해서 재사용 (포커스 이동/마커 클릭 모두 같은 윈도우 사용)
+    let infoWindow = infoWindowRef.current
+    if (!infoWindow) {
+      infoWindow = new naver.maps.InfoWindow({ borderWidth: 0 })
+      infoWindowRef.current = infoWindow
+    }
+
+    mapItems.forEach((item) => {
+      const lat = item.centerLat ?? item.metadata?.lat
+      const lng = item.centerLng ?? item.metadata?.lng
+      if (lat == null || lng == null) return
+      const pos = new naver.maps.LatLng(lat, lng)
+
+      if (item.isCluster) {
+        const div = document.createElement('div')
+        div.innerHTML = getClusterIconHtml(item.count)
+        div.style.cursor = 'pointer'
+        const marker = new naver.maps.Marker({
+          position: pos,
+          map,
+          icon: { content: div, anchor: new naver.maps.Point(24, 24) },
+        })
+        naver.maps.Event.addListener(marker, 'click', () => {
+          if (item.sameLocationGroup && item.posts && item.posts.length > 1) {
+            openSameLocationCarousel(map, pos, item.posts, infoWindow, getSpotPopupHtml, getPostPopupHtml, onSpotClick, onPostClick)
+          } else if (onClusterClick) {
+            onClusterClick(item)
+          }
+        })
+        markersRef.current.push(marker)
+        return
+      }
+
+      const isPlace = item.source === 'place' || item.spotData
+      const spot = item.spotData
+      const markerImage = item.image || item.images?.[0] || null
+      const div = document.createElement('div')
+      div.innerHTML = getCustomIconHtml(markerImage, !!isPlace)
+      div.style.cursor = 'pointer'
+      const marker = new naver.maps.Marker({
+        position: pos,
+        map,
+        icon: { content: div, anchor: new naver.maps.Point(32, 80) },
+      })
+
+      naver.maps.Event.addListener(marker, 'click', () => {
+        if (isPlace && spot) {
+          const html = getSpotPopupHtml(spot)
+          const wrap = document.createElement('div')
+          wrap.innerHTML = html
+          const btn = wrap.querySelector('.naver-popup-view-detail')
+          if (btn) btn.addEventListener('click', () => { onSpotClick(spot); infoWindow.close() })
+          infoWindow.setContent(wrap)
+          infoWindow.open(map, pos)
+        } else {
+          const html = getPostPopupHtml(item)
+          const wrap = document.createElement('div')
+          wrap.innerHTML = html
+          const btn = wrap.querySelector('.naver-popup-view-detail')
+          if (btn) btn.addEventListener('click', () => { onPostClick(item); infoWindow.close() })
+          infoWindow.setContent(wrap)
+          infoWindow.open(map, pos)
+        }
+      })
+      markersRef.current.push(marker)
+    })
+  }, [mapItems, onClusterClick, onSpotClick, onPostClick, getSpotPopupHtml, getPostPopupHtml])
+
+  return <div ref={mapRef} className="w-full h-full" />
+}
+
+function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
+  const hasPicked = Array.isArray(pickedPlaceIds) && pickedPlaceIds.length > 0
+  return (
+    <div className="absolute right-3 bottom-12 z-[1100] flex flex-col gap-2">
+      {/* 픽한 장소만 보기 필터 (로그인 + 픽한 장소가 있을 때 표시) */}
+      {hasPicked && (
+        <button
+          type="button"
+          onClick={onTogglePickedOnly}
+          className={`flex items-center justify-center w-10 h-10 rounded-full border shadow-lg transition-colors ${
+            showPickedOnlyOnMap
+              ? 'bg-[#ADFF2F]/30 border-[#ADFF2F] text-[#ADFF2F]'
+              : 'bg-black/80 border-gray-600 text-gray-400 hover:border-[#ADFF2F]/50 hover:text-[#ADFF2F]'
+          }`}
+          aria-label={lang === 'ko' ? '픽한 장소만 보기' : 'Show picked only'}
+          title={lang === 'ko' ? '픽한 장소만 보기' : 'Show picked only'}
+        >
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      )}
+      {userLocation && (
+        <button
+          type="button"
+          onClick={() => {
+            const map = naverMapRef?.current
+            if (map && window.naver?.maps) {
+              map.panTo(new naver.maps.LatLng(userLocation.lat, userLocation.lng))
+              map.setZoom(16)
+            }
+          }}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-black/80 border border-[#ADFF2F]/50 text-[#ADFF2F] shadow-lg hover:bg-[#ADFF2F]/20 transition-colors"
+          aria-label="현재 위치로 이동"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+}
 
 function App() {
   const location = useLocation()
@@ -19,7 +381,7 @@ function App() {
     return null
   }
 
-  const [currentView, setCurrentView] = useState('home')
+  const [currentView, setCurrentView] = useState('discover')
   const [selectedRegion, setSelectedRegion] = useState(null)
   const [selectedPlace, setSelectedPlace] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -36,7 +398,6 @@ function App() {
   const [vibePosts, setVibePosts] = useState([])
   const [isPosting, setIsPosting] = useState(false) // Post Vibe 업로드 중 상태
   const [mapZoom, setMapZoom] = useState(1) // 1 = 클러스터, 2 = 개별 핀
-  const [mapAdminOnly, setMapAdminOnly] = useState(false) // 지도에서 관리자 등록 장소만 보기
   const [selectedCluster, setSelectedCluster] = useState(null)
   const [selectedPin, setSelectedPin] = useState(null)
   const [leafletZoom, setLeafletZoom] = useState(16) // 지도 실제 확대 수준 (확대 시 클러스터 해제용)
@@ -57,6 +418,12 @@ function App() {
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false) // 삭제 확인 모달 표시 여부
   const [postToDelete, setPostToDelete] = useState(null) // 삭제할 포스트 ID
   const [userLocation, setUserLocation] = useState(null) // { lat: number, lng: number } | null
+  const naverMapInstanceRef = useRef(null) // 사용자 지도(Naver) 인스턴스 - MapControls용 (ref로 두어 setState 루프 방지)
+  const [lang, setLang] = useState(() => localStorage.getItem('spotvibe_lang') || 'ko') // 'ko' | 'en'
+  const [showRunningOnly, setShowRunningOnly] = useState(true) // 진행 중인 팝업만 보기 (Discover/Map 공통)
+  const [pickedPlaceIds, setPickedPlaceIds] = useState([]) // 사용자가 Pick한 장소 ID 목록
+  const [placeIdsCommentedByUser, setPlaceIdsCommentedByUser] = useState([]) // 댓글 단 장소 ID 목록 (마이페이지용)
+  const [showPickedOnlyOnMap, setShowPickedOnlyOnMap] = useState(false) // 지도에서 픽한 장소만 보기
 
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
@@ -89,6 +456,13 @@ function App() {
     }
     fetchUserLocation()
   }, [])
+
+  // 언어 설정 유지
+  useEffect(() => {
+    if (lang) {
+      localStorage.setItem('spotvibe_lang', lang)
+    }
+  }, [lang])
 
   // 브라우저 뒤로가기 처리
   useEffect(() => {
@@ -177,6 +551,59 @@ function App() {
     loadPosts()
   }, [user])
 
+  // 로그인 사용자의 Pick한 장소 ID 목록 로드
+  useEffect(() => {
+    const loadPickedPlaces = async () => {
+      if (!user?.id) {
+        setPickedPlaceIds([])
+        return
+      }
+      try {
+        const ids = await db.getPickedPlaceIds(user.id)
+        setPickedPlaceIds(ids || [])
+      } catch (err) {
+        console.error('Error loading picked places:', err)
+        setPickedPlaceIds([])
+      }
+    }
+    loadPickedPlaces()
+  }, [user?.id])
+
+  // 로그인 사용자가 댓글 단 장소 ID 목록 로드 (마이페이지용)
+  useEffect(() => {
+    const loadCommentedPlaces = async () => {
+      if (!user?.id) {
+        setPlaceIdsCommentedByUser([])
+        return
+      }
+      try {
+        const ids = await db.getPlaceIdsCommentedByUser(user.id)
+        setPlaceIdsCommentedByUser(ids || [])
+      } catch (err) {
+        console.error('Error loading commented places:', err)
+        setPlaceIdsCommentedByUser([])
+      }
+    }
+    loadCommentedPlaces()
+  }, [user?.id])
+
+  // 장소 Pick 토글 (Discover 리스트/상세에서 사용)
+  const handleTogglePlacePick = async (placeId, e) => {
+    if (e) e.stopPropagation()
+    if (!user?.id) {
+      setShowLoginModal(true)
+      return
+    }
+    try {
+      const { picked } = await db.togglePlacePick(placeId, user.id)
+      setPickedPlaceIds((prev) =>
+        picked ? [...prev, placeId] : prev.filter((id) => id !== placeId)
+      )
+    } catch (err) {
+      console.error('Error toggling place pick:', err)
+    }
+  }
+
   // Supabase에서 팝업스토어 목록 로드 및 정렬
   useEffect(() => {
     const loadPlaces = async () => {
@@ -192,7 +619,10 @@ function App() {
         ])
         const labelMap = {}
         ;[...(admission || []), ...(benefit || []), ...(amenity || []), ...(content || [])].forEach((c) => {
-          if (c.code_value) labelMap[c.code_value] = c.code_label
+          if (!c.code_value) return
+          const ko = c.code_label_ko || c.code_label || ''
+          const en = c.code_label_en || ko
+          labelMap[c.code_value] = { ko, en }
         })
         setPlaceTagLabelMap(labelMap)
         
@@ -255,6 +685,7 @@ function App() {
             lng: place.lng,
             thumbnail_url: place.thumbnail_url,
             description: place.description,
+            created_at: place.created_at ? new Date(place.created_at) : null,
             display_start_date: place.display_start_date,
             display_end_date: place.display_end_date,
             display_periods: place.display_periods,
@@ -262,6 +693,8 @@ function App() {
             info_url: place.info_url,
             phone: place.phone,
             hashtags: place.hashtags || [],
+            commentCount: place.commentCount || 0,
+            latestCommentAt: place.latestCommentAt ? new Date(place.latestCommentAt) : null,
           }
         })
 
@@ -536,17 +969,6 @@ function App() {
     if ('scrollRestoration' in history) {
       history.scrollRestoration = 'manual'
     }
-  }, [])
-
-  // Leaflet 기본 아이콘 설정 (이미지 경로 문제 해결) - 모든 훅은 조건부 렌더링 이전에 위치해야 함
-  useEffect(() => {
-    // @ts-ignore - Leaflet 타입 정의 문제 해결
-    delete L.Icon.Default.prototype._getIconUrl
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-    })
   }, [])
 
   // Feed 뷰 언마운트 시 스크롤 위치 초기화
@@ -1309,6 +1731,31 @@ function App() {
     return ep ? formatDisplayPeriod(ep.start, ep.end) : null
   }
 
+  // Discover 목록용 짧은 노출 기간 표시: "26.02.23.~26.03.15." (연도 앞 두 자리만, 시간 없음)
+  const formatDisplayPeriodShortForSpot = (spot) => {
+    const ep = getEffectiveDisplayPeriod(spot)
+    if (!ep || (!ep.start && !ep.end)) return null
+
+    const fmt = (v) => {
+      if (!v) return null
+      const s = typeof v === 'string' ? v : String(v)
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+      if (!m) return null
+      const yy = m[1].slice(2)
+      const mm = m[2]
+      const dd = m[3]
+      // 예: "26. 02. 23."
+      return `${yy}. ${mm}. ${dd}.`
+    }
+
+    const startStr = fmt(ep.start)
+    const endStr = fmt(ep.end)
+    if (startStr && endStr) return `${startStr} ~ ${endStr}`
+    if (startStr) return `${startStr} ~`
+    if (endStr) return `~ ${endStr}`
+    return null
+  }
+
   // D-day 배지 라벨 (Discover·Feed 공통 — 복수 구간 시 현재/다음 구간 기준, 한국 시간 날짜)
   const getDDayBadgeLabel = (spot) => {
     const ep = getEffectiveDisplayPeriod(spot)
@@ -1338,9 +1785,10 @@ function App() {
   // 혼잡도/Vibe 라벨 (Discover·Feed 공통 — 최신 포스트 30분 이내만 표시)
   const getFreshVibeLabelForSpot = (spot) => {
     const now = new Date()
-    const postsForPlace = vibePosts.filter(
-      (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
-    )
+    const postsForPlace = vibePosts.filter((p) => {
+      const placeName = p.placeName || p.place_name
+      return (p.placeId && p.placeId === spot.id) || (placeName && (placeName === spot.name || placeName === spot.name_en))
+    })
     if (postsForPlace.length === 0) return null
     const latest = postsForPlace.reduce((acc, cur) => {
       const t = cur.metadata?.capturedAt ? new Date(cur.metadata.capturedAt).getTime() : (cur.timestamp ? new Date(cur.timestamp).getTime() : 0)
@@ -1358,115 +1806,23 @@ function App() {
   // Discover 정렬 상태 / 상세 선택
   const [discoverSort, setDiscoverSort] = useState('distance') // 'distance' | 'latest' | 'hot'
   const [selectedDiscoverSpot, setSelectedDiscoverSpot] = useState(null)
-  const [discoverDetailFrom, setDiscoverDetailFrom] = useState(null) // 'discover' | 'home' — 장소 상세 진입 경로
+  const [discoverDetailFrom, setDiscoverDetailFrom] = useState(null) // 'discover' | 'home' | 'my' — 장소 상세 진입 경로
   const [viewBeforePostDetail, setViewBeforePostDetail] = useState(null) // 포스트 상세 진입 전 뷰 (뒤로가기용)
   const [mapFocusSpot, setMapFocusSpot] = useState(null) // 지도에서 특정 Discover 장소로 포커스 이동용
   const viewBeforePostDetailRef = useRef(null)
 
   const handleNavClick = (viewId) => {
-    if ((viewId === 'feed' || viewId === 'discover' || viewId === 'map') && !selectedRegion) {
-      // 지역 선택 화면으로
-      setCurrentView('home')
-    } else {
-      setCurrentView(viewId)
-    }
+    setCurrentView(viewId)
   }
 
-  // Home View - Region Selector
-  if (currentView === 'home') {
-  return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-4 py-12 pb-24">
-        {/* Header */}
-        <div className="text-center mb-16 space-y-4">
-          <h1 className="text-6xl md:text-7xl font-bold tracking-tight">
-            <span className="text-[#ADFF2F]">Spot</span>
-            <span className="text-white">Vibe</span>
-          </h1>
-          <p className="text-xl md:text-2xl text-gray-400 font-light tracking-wide">
-            Pick your Hotspot
-          </p>
-        </div>
-
-        {/* Region Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
-          {regions.map((region) => (
-            <div
-              key={region.id}
-              onClick={() => handleRegionClick(region)}
-              className={`
-                relative group cursor-pointer transition-all duration-300 h-full
-                ${region.active 
-                  ? 'opacity-100 hover:scale-105' 
-                  : 'opacity-60 grayscale hover:opacity-80'
-                }
-              `}
-            >
-              <div
-                className={`
-                  relative border-2 rounded-2xl p-8 md:p-10 min-h-[9.5rem] md:min-h-[10rem] h-full flex flex-col
-                  transition-all duration-300
-                  ${region.active
-                    ? 'border-[#ADFF2F] bg-gradient-to-br from-[#ADFF2F]/10 to-transparent hover:border-[#ADFF2F] hover:shadow-[0_0_30px_rgba(173,255,47,0.3)]'
-                    : 'border-gray-700 bg-gray-900/50 hover:border-gray-600'
-                  }
-                `}
-              >
-                {/* 우측 상단: Available Now / Coming Soon 동일 위치 */}
-                <div className="absolute top-4 right-4">
-                  {region.active ? (
-                    <span className="px-3 py-1 text-xs font-semibold bg-[#ADFF2F]/20 text-[#ADFF2F] rounded-full border border-[#ADFF2F]/50">
-                      Available Now
-                    </span>
-                  ) : (
-                    <span className="px-3 py-1 text-xs font-semibold bg-gray-800 text-gray-400 rounded-full border border-gray-700">
-                      Coming Soon
-                    </span>
-                  )}
-                </div>
-
-                <h2 className="text-3xl md:text-4xl font-bold mb-2 pr-28">
-                  {region.name}
-                </h2>
-
-                {region.active && (
-                  <div className="mt-3 pt-3 border-t border-[#ADFF2F]/30 flex items-center gap-6 text-sm text-gray-400">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-[#ADFF2F] font-semibold tabular-nums">
-                        {hotSpots.filter((spot) => spot.type === 'popup_store').length}
-                      </span>
-                      <span>Discover</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-[#ADFF2F] font-semibold tabular-nums">{vibePosts.length}</span>
-                      <span>Feed</span>
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
+  // Home View는 현재 사용하지 않음 (초기 진입 시 Discover로 바로 진입)
 
   // Discover View - 관리자 등록 팝업 전용
   if (currentView === 'discover') {
-    if (!selectedRegion) {
-      return (
-        <div className="min-h-screen bg-black text-white pb-24">
-          <div className="flex items-center justify-center min-h-screen">
-            <div className="text-center">
-              <p className="text-gray-400">Loading...</p>
-            </div>
-          </div>
-          <BottomNav currentView={currentView} onNavClick={handleNavClick} />
-        </div>
-      )
-    }
-
     // popup_store 타입만 대상
-    const popupSpots = hotSpots.filter((spot) => spot.type === 'popup_store')
+    const popupSpots = hotSpots
+      .filter((spot) => spot.type === 'popup_store')
+      .filter((spot) => (showRunningOnly ? spot.displayStatus === 'active' : true))
 
     // 장소별 통계 (Latest/Hot 정렬용) - placeId가 없을 수 있어 name 기준
     const statsByPlaceName = {}
@@ -1492,19 +1848,29 @@ function App() {
         const db = b.distance ?? Number.MAX_VALUE
         return da - db
       }
-      const sa = statsByPlaceName[a.name] || { count: 0, latestTimestamp: 0 }
-      const sb = statsByPlaceName[b.name] || { count: 0, latestTimestamp: 0 }
+
       if (discoverSort === 'latest') {
-        return (sb.latestTimestamp || 0) - (sa.latestTimestamp || 0)
+        const ta = a.created_at ? a.created_at.getTime() : 0
+        const tb = b.created_at ? b.created_at.getTime() : 0
+        return tb - ta // 관리자 등록일 기준 최신순
       }
-      // hot: count 기준
-      return (sb.count || 0) - (sa.count || 0)
+
+      if (discoverSort === 'hot') {
+        const ca = a.commentCount || 0
+        const cb = b.commentCount || 0
+        if (cb !== ca) return cb - ca // 댓글 많은 순
+        const la = a.latestCommentAt ? a.latestCommentAt.getTime() : 0
+        const lb = b.latestCommentAt ? b.latestCommentAt.getTime() : 0
+        return lb - la // 댓글 수 같으면 최근 댓글이 있는 장소 우선
+      }
+
+      return 0
     })
 
     const getFreshVibeLabel = (spot) => {
       const now = new Date()
       const postsForPlace = vibePosts.filter(
-        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && (p.placeName === spot.name || p.placeName === spot.name_en))
       )
       if (postsForPlace.length === 0) return null
       const latest = postsForPlace.reduce((acc, cur) => {
@@ -1531,33 +1897,42 @@ function App() {
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        {/* Header */}
-        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
-          <div className="max-w-[430px] mx-auto px-4 py-4">
+        {/* Header - 높이 지도 헤더와 동일 (96px) */}
+        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
-                Discover <span className="text-[#ADFF2F]">✨</span>
+                {I18N.discoverTitle[lang]} <span className="text-[#ADFF2F]">✨</span>
               </h1>
-              {selectedRegion && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setCurrentView('home')
-                    setSelectedRegion(null)
-                  }}
-                  className="text-sm text-gray-400 hover:text-[#ADFF2F]"
+                  type="button"
+                  onClick={() => setShowRunningOnly((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                    showRunningOnly
+                      ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border-[#ADFF2F]'
+                      : 'bg-gray-900 text-gray-400 border-gray-700 hover:text-white hover:border-[#ADFF2F]/60'
+                  }`}
                 >
-                  {selectedRegion.name} →
+                  {lang === 'ko' ? '진행중' : 'Running only'}
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')}
+                  className="px-2 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F] transition-colors"
+                >
+                  {lang === 'ko' ? 'EN' : 'KO'}
+                </button>
+              </div>
             </div>
 
             {/* Sort Tabs */}
             <div className="flex gap-2 mt-2">
               {['distance', 'latest', 'hot'].map((key) => {
                 const label =
-                  key === 'distance' ? 'Distance'
-                  : key === 'latest' ? 'Latest'
-                  : 'Hot'
+                  key === 'distance' ? I18N.discoverSortDistance[lang]
+                  : key === 'latest' ? I18N.discoverSortLatest[lang]
+                  : I18N.discoverSortHot[lang]
                 const isActive = discoverSort === key
                 return (
                   <button
@@ -1581,12 +1956,13 @@ function App() {
         <div className="max-w-[430px] mx-auto px-4 py-4 space-y-4">
           {sortedSpots.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">
-              No pop-up stores available.
+              {I18N.discoverNoSpots[lang]}
             </p>
           ) : (
             sortedSpots.map((spot) => {
               const dday = getDDayBadgeLabel(spot)
               const vibeFresh = getFreshVibeLabel(spot)
+              const isPicked = pickedPlaceIds.includes(spot.id)
               return (
                 <div
                   key={spot.id}
@@ -1595,9 +1971,23 @@ function App() {
                     setDiscoverDetailFrom('discover')
                     setCurrentView('discover-detail')
                   }}
-                  className="cursor-pointer overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60 hover:border-[#ADFF2F]/60 transition-all"
+                  className="cursor-pointer overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60 hover:border-[#ADFF2F]/60 transition-all relative"
                 >
-                  <div className="relative w-full overflow-hidden bg-gray-800 flex items-center justify-center">
+                  {/* Pick 버튼: 카드 클릭과 분리 */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleTogglePlacePick(spot.id, e)}
+                    className="absolute top-2 right-2 z-10 w-9 h-9 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 transition-colors"
+                    aria-label={isPicked ? (lang === 'ko' ? '픽 해제' : 'Unpick') : (lang === 'ko' ? '픽하기' : 'Pick')}
+                  >
+                    {isPicked ? (
+                      <svg className="w-5 h-5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                    )}
+                  </button>
+                  {/* 이미지 영역: 오버레이 없이 썸네일만 깔끔하게 표시 */}
+                  <div className="w-full overflow-hidden bg-gray-800 flex items-center justify-center">
                     {spot.thumbnail_url ? (
                       <img
                         src={spot.thumbnail_url}
@@ -1609,50 +1999,21 @@ function App() {
                         No image
                       </div>
                     )}
-                    {/* Gradient (위 텍스트 가독성용, 클릭 방해 방지) */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-
-                    {/* D-Day badge */}
-                    {dday && (
-                      <div className="absolute top-3 left-3">
-                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
-                          {dday}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Vibe badge (fresh only) */}
-                    {vibeFresh && (
-                      <div className="absolute top-3 right-3">
-                        <div className="px-2.5 py-1 rounded-full text-xs font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60 flex items-center gap-1">
-                          <span>{vibeFresh.label}</span>
-                          {vibeFresh.isLive && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Bottom text over image */}
-                    <div className="absolute bottom-3 left-3 right-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">{spot.name}</p>
-                          {spot.distance !== undefined && (
-                            <p className="text-[11px] text-gray-300 mt-0.5">
-                              {formatDistance(spot.distance)} away
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
-                  {/* Info area under image */}
+                  {/* Info area under image: 장소명, D-day, 기간, 태그 */}
                   <div className="px-4 py-3 space-y-1.5">
-                    {formatDisplayPeriodForSpot(spot) && (
+                    <p className="text-sm font-semibold">
+                      {lang === 'en' && spot.name_en ? spot.name_en : spot.name}
+                    </p>
+                    {dday && (
+                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
+                        {dday}
+                      </span>
+                    )}
+                    {formatDisplayPeriodShortForSpot(spot) && (
                       <p className="text-xs text-gray-400">
-                        {formatDisplayPeriodForSpot(spot)}
+                        {formatDisplayPeriodShortForSpot(spot)}
                       </p>
                     )}
                     {/* Hashtags: 활성 태그만 라벨로 표시, 숨김/삭제된 태그는 미표시 */}
@@ -1661,14 +2022,22 @@ function App() {
                       if (visibleTags.length === 0) return null
                       return (
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {visibleTags.map((codeValue) => (
-                            <span
-                              key={codeValue}
-                              className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
-                            >
-                              #{placeTagLabelMap[codeValue]}
-                            </span>
-                          ))}
+                          {visibleTags.map((codeValue) => {
+                            const labelObj = placeTagLabelMap[codeValue]
+                            const tagLabel =
+                              typeof labelObj === 'string'
+                                ? labelObj
+                                : (labelObj && (lang === 'en' ? (labelObj.en || labelObj.ko) : (labelObj.ko || labelObj.en)))
+                            if (!tagLabel) return null
+                            return (
+                              <span
+                                key={codeValue}
+                                className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                              >
+                                #{tagLabel}
+                              </span>
+                            )
+                          })}
                         </div>
                       )
                     })()}
@@ -1680,7 +2049,7 @@ function App() {
           )}
         </div>
 
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+          <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
@@ -1698,7 +2067,7 @@ function App() {
     const now = new Date()
     const vibeFresh = (() => {
       const postsForPlace = vibePosts.filter(
-        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
+        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && (p.placeName === spot.name || p.placeName === spot.name_en))
       )
       if (postsForPlace.length === 0) return null
       const latest = postsForPlace.reduce((acc, cur) => {
@@ -1725,39 +2094,48 @@ function App() {
 
     const handleBack = () => {
       setSelectedDiscoverSpot(null)
+      const from = discoverDetailFrom
       setDiscoverDetailFrom(null)
-      setCurrentView(discoverDetailFrom === 'home' ? 'map' : 'discover')
+      if (from === 'home') setCurrentView('map')
+      else if (from === 'my') setCurrentView('my')
+      else setCurrentView('discover')
     }
 
-    const getPostTime = (p) => {
-      const t = p.metadata?.capturedAt ? new Date(p.metadata.capturedAt).getTime() : (p.timestamp ? new Date(p.timestamp).getTime() : 0)
-      return t
-    }
-
-    // 해당 장소의 포스트: 최신 포스팅 순, 최대 10개
-    const communityPosts = vibePosts
-      .filter(
-        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && p.placeName === spot.name)
-      )
-      .sort((a, b) => getPostTime(b) - getPostTime(a))
-      .slice(0, 10)
+    const backLabel =
+      discoverDetailFrom === 'home'
+        ? (lang === 'ko' ? '지도로' : 'Back to Map')
+        : discoverDetailFrom === 'my'
+          ? (lang === 'ko' ? '마이로' : 'Back to My')
+          : (lang === 'ko' ? '디스커버로' : 'Back to Discover')
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        {/* Header */}
-        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
-          <div className="max-w-[430px] mx-auto px-4 py-3 flex items-center justify-between">
+        {/* Header - 모바일 430px·높이 통일 */}
+        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full flex items-center justify-between">
             <button
               onClick={handleBack}
               className="text-sm text-gray-400 hover:text-[#ADFF2F] flex items-center gap-1"
             >
               <span>←</span>
-              <span>{discoverDetailFrom === 'home' ? 'Back to Map' : 'Back to Discover'}</span>
+              <span>{backLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTogglePlacePick(spot.id)}
+              className="w-9 h-9 rounded-full bg-gray-800 flex items-center justify-center hover:bg-gray-700 transition-colors"
+              aria-label={pickedPlaceIds.includes(spot.id) ? (lang === 'ko' ? '픽 해제' : 'Unpick') : (lang === 'ko' ? '픽하기' : 'Pick')}
+            >
+              {pickedPlaceIds.includes(spot.id) ? (
+                <svg className="w-5 h-5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              ) : (
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+              )}
             </button>
           </div>
         </div>
 
-        {/* Hero + Info */}
+          {/* Hero + Info */}
         <div className="max-w-[430px] mx-auto px-4 pt-4">
           <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60">
             {/* 순수 이미지 영역 */}
@@ -1814,7 +2192,6 @@ function App() {
                       setSelectedDiscoverSpot(spot)
                       setDiscoverDetailFrom('home')
                       setCurrentView('map')
-                      setMapAdminOnly(true)
                     }}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
                   >
@@ -1844,14 +2221,22 @@ function App() {
                 if (visibleTags.length === 0) return null
                 return (
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {visibleTags.map((codeValue) => (
-                      <span
-                        key={codeValue}
-                        className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
-                      >
-                        #{placeTagLabelMap[codeValue]}
-                      </span>
-                    ))}
+                    {visibleTags.map((codeValue) => {
+                      const labelObj = placeTagLabelMap[codeValue]
+                      const tagLabel =
+                        typeof labelObj === 'string'
+                          ? labelObj
+                          : (labelObj && (lang === 'en' ? (labelObj.en || labelObj.ko) : (labelObj.ko || labelObj.en)))
+                      if (!tagLabel) return null
+                      return (
+                        <span
+                          key={codeValue}
+                          className="px-2 py-0.5 rounded-full bg-gray-800 text-[11px] text-gray-300"
+                        >
+                          #{tagLabel}
+                        </span>
+                      )
+                    })}
                   </div>
                 )
               })()}
@@ -1878,74 +2263,24 @@ function App() {
             </div>
           </div>
 
-          {/* Feed 포스트 섹션 (최신 포스팅 순, 촬영일시 표시) */}
-          <div className="mt-6">
-            <h2 className="text-sm font-semibold text-gray-300 mb-2">
-              Feed
-            </h2>
-            {communityPosts.length === 0 ? (
-              <p className="text-xs text-gray-500">
-                No posts yet for this place.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                {communityPosts.map((post) => (
-                  <div
-                    key={post.id}
-                    className="relative cursor-pointer overflow-hidden rounded-lg border border-gray-800 bg-gray-900/60"
-                    onClick={() => handlePostClick(post)}
-                  >
-                    <div className="h-28 w-full overflow-hidden">
-                      <img
-                        src={post.image || post.images?.[0]}
-                        alt={post.placeName}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                    <div className="absolute bottom-1 left-1 right-1">
-                      <p className="text-[11px] text-gray-200 truncate">
-                        {post.metadata?.capturedAt
-                          ? formatCapturedTimeWithRecency(post.metadata.capturedAt)
-                          : (post.timestamp ? formatCapturedTimeWithRecency(post.timestamp) : (post.description || post.placeName))}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* 댓글 섹션 (댓글 목록 + 작성) */}
+          <PlaceCommentsSection spot={spot} user={user} />
         </div>
 
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+          <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
 
   if (currentView === 'feed') {
-    // selectedRegion이 없으면 로딩 화면 표시
-    // useEffect에서 home으로 리다이렉트 처리 중이거나 localStorage 복원 중
-    if (!selectedRegion) {
-      return (
-        <div className="min-h-screen bg-black text-white pb-24">
-          <div className="flex items-center justify-center min-h-screen">
-            <div className="text-center">
-              <p className="text-gray-400">Loading...</p>
-            </div>
-          </div>
-          <BottomNav currentView={currentView} onNavClick={handleNavClick} />
-        </div>
-      )
-    }
-    
     const filteredPosts = getFilteredPosts()
     const filteredSpot = spotFilter ? hotSpots.find((s) => s.id === spotFilter) : null
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        {/* Header */}
-        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
-          <div className="max-w-6xl mx-auto px-4 py-4">
+        {/* Header - 모바일 430px 통일 */}
+        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
                 Live Vibe Stream <span className="text-[#ADFF2F]">🔥</span>
@@ -1967,8 +2302,8 @@ function App() {
 
         {/* Filter Bar */}
         {spotFilter && filteredSpot && (
-          <div className="sticky top-[73px] bg-[#ADFF2F]/10 border-b border-[#ADFF2F]/30 z-[9]">
-            <div className="max-w-6xl mx-auto px-4 py-3">
+          <div className="sticky top-[96px] bg-[#ADFF2F]/10 border-b border-[#ADFF2F]/30 z-[9]">
+            <div className="max-w-[430px] mx-auto px-4 py-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-[#ADFF2F]">
@@ -2055,7 +2390,9 @@ function App() {
                           : 'border-gray-800 hover:border-[#ADFF2F]/50'
                       }`}
                     >
-                      <h3 className="font-bold text-sm mb-1">{spot.name}</h3>
+                      <h3 className="font-bold text-sm mb-1">
+                        {lang === 'en' && spot.name_en ? spot.name_en : spot.name}
+                      </h3>
                       {formatDisplayPeriodForSpot(spot) && (
                         <div className="text-xs text-gray-400 mb-2 space-y-0.5">
                           <p>{formatDisplayPeriodForSpot(spot)}</p>
@@ -2324,7 +2661,7 @@ function App() {
         )}
 
         {/* Bottom Navigation */}
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
@@ -2413,260 +2750,79 @@ function App() {
         }
       }
       
+      // 확대해도 흩어지지 않을 정도로 같은 위치면 캐러셀 팝업용 플래그 (약 1m 이내)
+      const eps = 1e-5
+      const sameLocationGroup = cluster.posts.every((p) => {
+        const lat = p.metadata?.lat ?? p.lat
+        const lng = p.metadata?.lng ?? p.lng
+        return lat != null && lng != null && Math.abs(lat - cluster.centerLat) < eps && Math.abs(lng - cluster.centerLng) < eps
+      })
+
       // 클러스터일 때는 첫 번째 포스트의 대표 정보 포함
       return {
         ...cluster,
-        ...firstPost, // 첫 번째 포스트의 속성 포함 (metadata, vibe, placeName 등)
+        ...firstPost,
         image: mainImage,
         isCluster: true,
         count: cluster.posts.length,
-        // 클러스터일 때는 첫 번째 포스트의 id를 사용 (View Detail 버튼용)
         id: firstPost.id,
+        sameLocationGroup: sameLocationGroup && cluster.posts.length > 1,
       }
     })
-  }
-
-  // 지도 빈 공간 클릭 핸들러 컴포넌트
-  function MapClickHandler({ onMapClick }) {
-    useMapEvents({
-      click: (e) => {
-        // 마커나 팝업이 아닌 지도 자체를 클릭했을 때만 실행
-        if (e.originalEvent && e.originalEvent.target) {
-          const target = e.originalEvent.target
-          if (
-            !target.closest('.leaflet-marker-icon') &&
-            !target.closest('.leaflet-popup') &&
-            !target.closest('.leaflet-popup-content-wrapper')
-          ) {
-            onMapClick()
-          }
-        }
-      },
-    })
-    return null
-  }
-
-  // 지도 컨테이너 크기 재계산 (탭 전환 후 검정 화면만 나오는 현상 방지)
-  function MapInvalidateSize() {
-    const map = useMap()
-    useEffect(() => {
-      const t = setTimeout(() => {
-        map.invalidateSize()
-      }, 100)
-      return () => clearTimeout(t)
-    }, [map])
-    return null
-  }
-
-  // 지도 확대 수준 동기화 (확대 시 클러스터가 개별 마커로 펼쳐지도록)
-  function MapZoomSync({ onZoomChange }) {
-    const map = useMap()
-    useMapEvents({
-      zoomend: () => onZoomChange(map.getZoom()),
-    })
-    useEffect(() => {
-      onZoomChange(map.getZoom())
-    }, [map, onZoomChange])
-    return null
-  }
-
-  // 펼쳐진 상태에서 지도 축소 시 클러스터 선택 해제 → 다시 뭉쳐지게
-  function MapClusterCollapseOnZoomOut({ mapZoom, selectedCluster, onCollapse }) {
-    const map = useMap()
-    useMapEvents({
-      zoomend: () => {
-        if (mapZoom === 2 && selectedCluster && map.getZoom() < 17) {
-          onCollapse()
-        }
-      },
-    })
-    return null
   }
 
   // (사용 안 함) MapFitToCluster는 클러스터 클릭 시 자동 이동이 과하게 반복되어 제거되었습니다.
 
-  // 지도 우측 하단 컨트롤 (Discover only 토글 + 현재 위치로 이동)
-  function MapControls({ userLocation, mapAdminOnly, onToggleDiscoverOnly }) {
-    const map = useMap()
-    return (
-      <div className="absolute right-3 bottom-12 z-[1100] flex flex-col gap-2">
-        {/* 현재 위치로 이동 (위쪽) */}
-        {userLocation && (
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                map.flyTo([userLocation.lat, userLocation.lng], map.getZoom() || 16, { duration: 0.5 })
-              } catch {
-                map.setView([userLocation.lat, userLocation.lng], map.getZoom() || 16)
-              }
-            }}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-black/80 border border-[#ADFF2F]/50 text-[#ADFF2F] shadow-lg hover:bg-[#ADFF2F]/20 transition-colors"
-            aria-label="현재 위치로 이동"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
-            </svg>
-          </button>
-        )}
-
-        {/* Discover only 토글 (아래쪽, 저작권 위) */}
-        <button
-          type="button"
-          onClick={onToggleDiscoverOnly}
-          className={`flex items-center justify-center w-10 h-10 rounded-full border text-xs font-semibold shadow-lg transition-colors border-red-500 ${
-            mapAdminOnly
-              ? 'bg-red-500 text-black'
-              : 'bg-black/70 text-red-400 hover:bg-red-500/10'
-          }`}
-          aria-pressed={mapAdminOnly}
-          aria-label="Discover only 토글"
-        >
-          <span className="text-sm leading-none">★</span>
-        </button>
-      </div>
-    )
+  // 지도 팝업용 HTML 생성 (Naver InfoWindow용, 이스케이프 포함)
+  const escapeHtml = (s) => {
+    if (s == null || s === '') return ''
+    const t = String(s)
+    return t
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
   }
-
-  // Discover 상세에서 "지도에서 보기"로 넘어온 경우, 해당 장소로 한 번만 포커스 이동
-  function MapFocusSpot({ spot, onDone }) {
-    const map = useMap()
-    useEffect(() => {
-      if (!spot || !spot.lat || !spot.lng) return
-      const target = [spot.lat, spot.lng]
-      try {
-        map.flyTo(target, 17, { duration: 0.5 })
-      } catch {
-        map.setView(target, 17)
-      }
-      if (onDone) {
-        onDone()
-      }
-    }, [spot, map, onDone])
-    return null
+  const getSpotPopupHtml = (spot) => {
+    const name = escapeHtml(spot?.name || '')
+    const img = spot?.thumbnail_url ? `<div style="margin-bottom:12px;text-align:center;background:#1f2937;border-radius:8px;overflow:hidden;max-height:160px;"><img src="${escapeHtml(spot.thumbnail_url)}" alt="${name}" style="width:100%;height:auto;max-height:160px;object-fit:contain;" /></div>` : ''
+    const typeLabel = spot?.type === 'popup_store' ? 'Pop-up Store' : spot?.type === 'restaurant' ? 'Restaurant' : spot?.type === 'shop' ? 'Shop' : spot?.type ? escapeHtml(spot.type) : ''
+    const period = formatDisplayPeriodForSpot(spot) ? `<div style="font-size:12px;color:#ADFF2F;margin-bottom:4px;">${escapeHtml(formatDisplayPeriodForSpot(spot))}</div>` : ''
+    // 인라인 스타일로 줄바꿈·2줄 말줄임 보장 (동적 HTML은 Tailwind 클래스 미적용 가능)
+    const desc = spot?.description ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px;word-break:break-word;overflow-wrap:break-word;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;">${escapeHtml(spot.description)}</div>` : ''
+    return `<div style="color:white;font-size:14px;background:#111827;border:2px solid #ef4444;border-radius:8px;padding:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);min-width:200px;max-width:min(280px,calc(100vw - 32px));box-sizing:border-box;">${img}<div style="margin-top:8px;"><div style="font-weight:700;font-size:14px;margin-bottom:4px;">${name}</div>${typeLabel ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">${typeLabel}</div>` : ''}${period}${desc}</div><button type="button" class="naver-popup-view-detail" style="width:100%;background:#ADFF2F;color:#000;font-weight:600;padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;border:none;cursor:pointer;">View Detail →</button></div>`
   }
-
-  // 사용자 현재 위치 마커 컴포넌트 (반짝이는 pulse 애니메이션, 자동 이동 없음)
-  function UserLocationMarker({ location }) {
-    if (!location) return null
-
-    const userLocIcon = L.divIcon({
-      html: `
-        <div class="user-location-marker-wrapper" style="position:relative;width:32px;height:32px;margin-left:-16px;margin-top:-16px;">
-          <div class="user-location-pulse" style="position:absolute;inset:-8px;border-radius:50%;border:2px solid #3B82F6;animation:user-location-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite;"></div>
-          <div style="position:absolute;inset:0;border-radius:50%;background:#60A5FA;border:2px solid #3B82F6;box-shadow:0 0 0 4px rgba(59,130,246,0.2);"></div>
-        </div>
-      `,
-      className: 'user-location-marker',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-    })
-
-    return <Marker position={[location.lat, location.lng]} icon={userLocIcon} zIndexOffset={1000} />
-  }
-
-  // 커스텀 마커 아이콘 생성 함수 (isAdmin: true면 Discover 장소용 빨간 테두리)
-  const createCustomIcon = (imageUrl, isRecent = false, timeAgo = '', isAdmin = false) => {
-    // 이미지 URL이 없으면 기본 이미지 사용
-    if (!imageUrl) {
-      imageUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMzMzMzMzIi8+CjxwYXRoIGQ9Ik0zMiAyMEMyNS4zNzI2IDIwIDIwIDI1LjM3MjYgMjAgMzJDMjAgMzguNjI3NCAyNS4zNzI2IDQ0IDMyIDQ0QzM4LjYyNzQgNDQgNDQgMzguNjI3NCA0NCAzMkM0NCAyNS4zNzI2IDM4LjYyNzQgMjAgMzIgMjBaIiBmaWxsPSIjQUREQ0YyRiIvPgo8L3N2Zz4K'
-    }
-    const borderColor = isAdmin ? '#ef4444' : '#ADFF2F'
-    const shadowColor = isAdmin ? 'rgba(239,68,68,0.5)' : 'rgba(173,255,47,0.5)'
-
-    // HTML 이스케이프 처리
-    const escapedImageUrl = imageUrl.replace(/"/g, '&quot;')
-    const escapedTimeAgo = timeAgo && typeof timeAgo === 'string'
-      ? timeAgo.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-      : ''
-
-    // 시간 정보 배지 HTML
-    const timeBadge = escapedTimeAgo
-      ? `<div style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: ${borderColor}; font-size: 9px; font-weight: bold; padding: 3px 6px; border-radius: 6px; white-space: nowrap; z-index: 10; border: 1px solid ${borderColor}; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">${escapedTimeAgo}</div>`
-      : ''
-
-    const recentPulse = isRecent
-      ? `<div style="position: absolute; inset: 0; border-radius: 50%; background: ${borderColor}; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.5;"></div>`
-      : ''
-
-    return L.divIcon({
-      className: 'custom-marker',
-      html: `
-        <div style="position: relative; width: 64px; height: 80px;">
-          ${recentPulse}
-          <div style="position: relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; border: 2px solid ${borderColor}; box-shadow: 0 10px 15px -3px ${shadowColor}; background: #000;">
-            <img src="${escapedImageUrl}" alt="pin" style="width: 100%; height: 100%; object-fit: cover;" />
-            <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, transparent 60%);"></div>
-            ${timeBadge}
-          </div>
-          <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%);">
-            <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 8px solid ${borderColor};"></div>
-          </div>
-        </div>
-      `,
-      iconSize: [64, 80],
-      iconAnchor: [32, 80],
-      popupAnchor: [0, -80],
-    })
-  }
-
-  // 지도 빈 공간 클릭 핸들러 컴포넌트
-  function MapClickHandler({ onMapClick }) {
-    useMapEvents({
-      click: (e) => {
-        // 마커나 팝업이 아닌 지도 자체를 클릭했을 때만 실행
-        // Leaflet의 이벤트는 버블링되므로, 마커 클릭은 이미 처리됨
-        // 여기서는 지도 배경을 클릭한 경우만 처리
-        if (e.originalEvent && e.originalEvent.target) {
-          const target = e.originalEvent.target
-          // 마커나 팝업 요소가 아닌 경우에만 실행
-          if (
-            !target.closest('.leaflet-marker-icon') &&
-            !target.closest('.leaflet-popup') &&
-            !target.closest('.leaflet-popup-content-wrapper')
-          ) {
-            onMapClick()
-          }
-        }
-      },
-    })
-    return null
-  }
-
-  // 클러스터 아이콘 생성 함수
-  const createClusterIcon = (count) => {
-    return L.divIcon({
-      className: 'custom-cluster-marker',
-      html: `
-        <div style="position: relative; width: 48px; height: 48px; animation: radar-pulse 2s ease-in-out infinite;">
-          <div style="position: absolute; inset: 0; border-radius: 50%; background: #ADFF2F; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.75;"></div>
-          <div style="position: relative; width: 48px; height: 48px; border-radius: 50%; background: #ADFF2F; border: 2px solid #000; box-shadow: 0 10px 15px -3px rgba(173,255,47,0.5); display: flex; align-items: center; justify-content: center;">
-            <span style="color: #000; font-weight: bold; font-size: 12px;">${count}+</span>
-          </div>
-          <div style="position: absolute; inset: 0; border-radius: 50%; border: 2px solid #ADFF2F; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
-        </div>
-      `,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
-    })
+  const getPostPopupHtml = (item) => {
+    const vibeInfo = getVibeInfo(item?.vibe)
+    const vibeLabel = vibeInfo?.label ? escapeHtml(vibeInfo.label) : ''
+    const placeName = escapeHtml(item?.placeName || '')
+    const timeStr = (item?.metadata?.capturedAt || item?.timestamp) ? formatCapturedTimeWithRecency(item.metadata?.capturedAt || item.timestamp) : ''
+    const imgUrl = item?.image || item?.images?.[0] || ''
+    const img = imgUrl ? `<img src="${escapeHtml(imgUrl)}" alt="${placeName}" style="width:64px;height:64px;border-radius:8px;object-fit:cover;flex-shrink:0;" />` : ''
+    return `<div style="color:white;font-size:14px;background:#111827;border:2px solid #ADFF2F;border-radius:8px;padding:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);min-width:200px;max-width:min(280px,calc(100vw - 32px));box-sizing:border-box;"><div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">${img}<div style="flex:1;min-width:0;"><h3 style="font-weight:700;font-size:14px;margin-bottom:4px;word-break:break-word;">${placeName}</h3><div style="margin-bottom:8px;"><span style="font-size:12px;color:#ADFF2F;">${vibeLabel}</span></div>${timeStr ? `<div style="font-size:12px;color:#9ca3af;">${escapeHtml(timeStr)}</div>` : ''}</div></div><button type="button" class="naver-popup-view-detail" style="width:100%;background:#ADFF2F;color:#000;font-weight:600;padding:8px 12px;border-radius:6px;font-size:12px;border:none;cursor:pointer;">View Detail →</button></div>`
   }
 
   // Map View
   if (currentView === 'map') {
-    // 선택된 카테고리에 따라 포스트 필터링 (category_type 기준)
-    const postsForMap = mapAdminOnly
-      ? [] // Discover only 모드에서는 사용자 피드 기반 마커 숨김
-      : (selectedHotSpotCategory
-        ? vibePosts.filter((post) => (post.category_type || 'other') === selectedHotSpotCategory)
-        : vibePosts)
-
-    // 지도에는 진행 중/시작 예정/무제한인 장소만 노출
-    const activeHotSpotsForMap = hotSpots.filter(
-      (spot) =>
+    // 지도에는 기본적으로 진행 중인 팝업만 노출, 옵션 해제 시에는 예정/무제한도 함께 노출
+    let activeHotSpotsForMap = hotSpots.filter((spot) => {
+      if (showRunningOnly) {
+        return spot.displayStatus === 'active'
+      }
+      return (
         spot.displayStatus === 'active' ||
         spot.displayStatus === 'scheduled' ||
         spot.displayStatus === 'unlimited'
-    )
+      )
+    })
+
+    // 픽한 장소만 보기 필터: 로그인 사용자가 켜면 픽한 장소만 노출
+    if (showPickedOnlyOnMap && user?.id && pickedPlaceIds.length > 0) {
+      activeHotSpotsForMap = activeHotSpotsForMap.filter((spot) =>
+        pickedPlaceIds.includes(spot.id)
+      )
+    }
 
     // 관리자 장소를 항상 피드와 동일한 클러스터/커스텀 이미지 마커(빨간 테두리)로 표시하기 위한 fake post 목록
     const placeFakePosts = activeHotSpotsForMap
@@ -2681,11 +2837,7 @@ function App() {
         spotData: spot,
       }))
 
-    const mapItems = clusterPosts(
-      mapAdminOnly ? placeFakePosts : [...postsForMap, ...placeFakePosts],
-      mapZoom,
-      leafletZoom
-    )
+    const mapItems = clusterPosts(placeFakePosts, mapZoom, leafletZoom)
     // 선택한 지역이 있으면 해당 지역 중심, 없으면 성수동 기본값
     const mapCenter = selectedRegion 
       ? (selectedRegion.id === 'Seongsu' ? [37.5446, 127.0559] : [37.5446, 127.0559]) // 다른 지역 좌표는 나중에 추가
@@ -2693,38 +2845,52 @@ function App() {
 
     return (
       <div className="min-h-screen bg-black text-white pb-24 relative overflow-hidden">
-        {/* Header */}
-        <div className="absolute top-0 left-0 right-0 bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
-          <div className="px-4 py-3 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h1 className="text-xl font-bold">
-                  Live Radar <span className="text-[#ADFF2F]">📡</span>
-                </h1>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {vibePosts.filter((p) => p.metadata).length} active signals
-                </p>
+        {/* Header - 디스커버 헤더와 동일한 높이·타이틀·버튼 스타일·간격 */}
+        <div className="absolute top-0 left-0 right-0 min-h-[96px] flex flex-col justify-center bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-2xl font-bold">
+                {I18N.mapTitle[lang]} <span className="text-[#ADFF2F]">📡</span>
+              </h1>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRunningOnly((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                    showRunningOnly
+                      ? 'bg-[#ADFF2F]/20 text-[#ADFF2F] border-[#ADFF2F]'
+                      : 'bg-gray-900 text-gray-400 border-gray-700 hover:text-white hover:border-[#ADFF2F]/60'
+                  }`}
+                >
+                  {lang === 'ko' ? '진행중' : 'Running only'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')}
+                  className="px-2 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F] transition-colors"
+                >
+                  {lang === 'ko' ? 'EN' : 'KO'}
+                </button>
               </div>
             </div>
-            {/* 카테고리 필터 (지도 상단) */}
+            {/* 카테고리 필터 - 디스커버 정렬 탭과 동일한 버튼 스타일 (rounded-full, border) */}
             {categories.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              <div className="flex gap-2 mt-2 overflow-x-auto pb-1 scrollbar-hide">
                 {categories.map((category) => {
                   const isSelected = selectedHotSpotCategory === category.code_value
                   return (
                     <button
                       key={category.code_value}
                       onClick={() => {
-                        // 카테고리 변경 시 클러스터 상태 리셋
                         setSelectedHotSpotCategory(category.code_value)
                         setMapZoom(1)
                         setSelectedCluster(null)
                         setSelectedPin(null)
                       }}
-                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
                         isSelected
-                          ? 'bg-[#ADFF2F] text-black'
-                          : 'bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-white'
+                          ? 'bg-[#ADFF2F] text-black border-[#ADFF2F]'
+                          : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800 hover:text-white'
                       }`}
                     >
                       {category.code_label}
@@ -2736,245 +2902,73 @@ function App() {
           </div>
         </div>
 
-        {/* Leaflet Map - 헤더(약 110px)와 BottomNav(약 89px) 사이 영역을 정확히 채우도록 높이/위치 지정 */}
+        {/* Naver Map - 헤더(약 96px)와 BottomNav(약 89px) 사이 영역을 꽉 채움 */}
         <div
           className="absolute inset-x-0"
           style={{
-            top: '110px',
-            height: 'calc(100vh - 110px - 89px)',
+            top: '96px',
+            height: 'calc(100vh - 96px - 89px)',
           }}
         >
-          <MapContainer
+          <LiveRadarNaverMap
             center={mapCenter}
-            zoom={16}
-            style={{ height: '100%', width: '100%', zIndex: 1 }}
-            className="user-map-dark"
-            scrollWheelZoom={true}
-          >
-            {/* 사용자 화면: 고대비 다크 테마 타일 (OSM 기반, MapTiler) */}
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a>'
-              url={`https://api.maptiler.com/maps/streets-v2-dark/256/{z}/{x}/{y}.png?key=${import.meta.env.VITE_MAPTILER_KEY}`}
-            />
-
-            {/* 탭 전환 후 컨테이너 크기 재계산 → 타일 로드 유도 (검정 화면 방지) */}
-            <MapInvalidateSize />
-
-            {/* 지도 빈 공간 클릭 감지 컴포넌트 */}
-            <MapClickHandler
-              onMapClick={() => {
-                // 지도 빈 공간 클릭 시 클러스터 상태 리셋
+            mapItems={mapItems}
+            mapFocusSpot={mapFocusSpot}
+            onFocusDone={() => setMapFocusSpot(null)}
+            userLocation={userLocation}
+            onMapReady={(map) => { naverMapInstanceRef.current = map }}
+            onZoomChange={(z) => {
+              setLeafletZoom(z)
+              if (z < 17) {
                 setMapZoom(1)
                 setSelectedCluster(null)
                 setSelectedPin(null)
-              }}
-            />
-
-            {/* 지도 확대 수준 동기화 → 확대 시 클러스터가 개별 마커로 펼쳐짐 */}
-            <MapZoomSync onZoomChange={setLeafletZoom} />
-
-            {/* 펼쳐진 상태에서 축소하면 선택 해제 후 다시 뭉쳐지게 */}
-            <MapClusterCollapseOnZoomOut
-              mapZoom={mapZoom}
-              selectedCluster={selectedCluster}
-              onCollapse={() => {
-                setMapZoom(1)
-                setSelectedCluster(null)
-                setSelectedPin(null)
-              }}
-            />
-
-            {/* 사용자 현재 위치 마커 */}
-            {userLocation && (
-              <UserLocationMarker location={userLocation} />
-            )}
-
-            {/* Discover 상세에서 넘어온 경우 해당 장소로 포커스 */}
-            <MapFocusSpot
-              spot={mapFocusSpot}
-              onDone={() => setMapFocusSpot(null)}
-            />
-
-            {/* 우측 하단 컨트롤: Discover only 토글 + 현재 위치 이동 */}
-            <MapControls
-              userLocation={userLocation}
-              mapAdminOnly={mapAdminOnly}
-              onToggleDiscoverOnly={() => {
-                setMapAdminOnly((prev) => !prev)
-                setMapZoom(1)
-                setSelectedCluster(null)
-                setSelectedPin(null)
-              }}
-            />
-
-            {/* 마커 표시 (피드 포스트 + 관리자 장소 모두 커스텀 이미지 마커·클러스터로 표시) */}
-            {mapItems.length > 0 ? (
-              mapItems.map((item) => {
-                // 메타데이터가 없으면 건너뛰기
-                if (!item.metadata && !item.centerLat) return null
-                
-                const position = [
-                  item.centerLat || item.metadata.lat,
-                  item.centerLng || item.metadata.lng,
-                ]
-                const isRecent = item.metadata
-                  ? (Date.now() - new Date(item.metadata.capturedAt).getTime()) / 60000 < 5
-                  : false
-
-                if (item.isCluster) {
-                  return (
-                    <Marker
-                      key={item.id}
-                      position={position}
-                      icon={createClusterIcon(item.count)}
-                      eventHandlers={{
-                        click: () => {
-                          setSelectedCluster(item)
-                          setMapZoom(2)
-                        },
-                      }}
-                    />
-                  )
-                }
-
-                // Discover 장소(관리자 등록): 빨간 테두리 마커 + Discover 팝업
-                const isPlace = item.source === 'place' || item.spotData
-                const spot = item.spotData
-
-                if (isPlace && spot) {
-                  const markerImage = item.image || item.images?.[0] || null
-                  return (
-                    <Marker
-                      key={item.id}
-                      position={position}
-                      icon={createCustomIcon(markerImage, false, '', true)}
-                    >
-                      <Popup className="custom-popup">
-                        <div className="bg-gray-900 border-2 border-red-500 rounded-lg p-4 shadow-2xl min-w-[200px]">
-                          {spot.thumbnail_url && (
-                            <div className="mb-3 flex items-center justify-center bg-gray-800 rounded overflow-hidden max-h-40">
-                              <img
-                                src={spot.thumbnail_url}
-                                alt={spot.name}
-                                className="w-full h-auto object-contain max-h-40"
-                              />
-                            </div>
-                          )}
-                          <div className="space-y-2">
-                            <div className="font-bold text-sm text-white mb-1">{spot.name}</div>
-                            {spot.type && (
-                              <div className="text-xs text-gray-400 mb-1">
-                                {spot.type === 'popup_store' && 'Pop-up Store'}
-                                {spot.type === 'restaurant' && 'Restaurant'}
-                                {spot.type === 'shop' && 'Shop'}
-                                {!['popup_store', 'restaurant', 'shop'].includes(spot.type) && spot.type}
-                              </div>
-                            )}
-                            {formatDisplayPeriodForSpot(spot) && (
-                              <div className="text-xs text-[#ADFF2F] mb-1">
-                                {formatDisplayPeriodForSpot(spot)}
-                              </div>
-                            )}
-                            {spot.description && (
-                              <div className="text-xs text-gray-400 mb-2 line-clamp-2 break-words whitespace-pre-line">
-                                {spot.description}
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              e.preventDefault()
-                              setSelectedDiscoverSpot(spot)
-                              setDiscoverDetailFrom('home')
-                              setCurrentView('discover-detail')
-                            }}
-                            className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors mt-3"
-                          >
-                            View Detail →
-                          </button>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  )
-                }
-
-                // 사용자 피드 포스트: 기존 커스텀 마커 + 포스트 팝업
-                const vibeInfo = getVibeInfo(item.vibe)
-                const timeAgo = item.metadata?.capturedAt
-                  ? getTimeAgo(new Date(item.metadata.capturedAt))
-                  : (item.timestamp ? getTimeAgo(new Date(item.timestamp)) : '')
-                const markerImage = item.image || item.images?.[0] || null
-
-                return (
-                  <Marker
-                    key={item.id}
-                    position={position}
-                    icon={createCustomIcon(markerImage, isRecent, timeAgo, false)}
-                  >
-                      <Popup className="custom-popup">
-                        <div className="bg-gray-900 border-2 border-[#ADFF2F] rounded-lg p-4 shadow-2xl min-w-[200px]">
-                          <div className="flex items-start gap-3 mb-3">
-                            <img
-                              src={markerImage || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMzMzMzMzIi8+Cjwvc3ZnPgo='}
-                              alt={item.placeName}
-                              className="w-16 h-16 rounded object-cover"
-                            />
-                            <div className="flex-1">
-                              <h3 className="font-bold text-sm mb-1 text-white">{item.placeName}</h3>
-                              <div className="mb-2">
-                                <span className="text-xs text-[#ADFF2F]">{vibeInfo.label}</span>
-                              </div>
-                              {(item.metadata?.capturedAt || item.timestamp) && (
-                                <div className="text-xs text-gray-400">
-                                  <div className="flex items-center gap-1.5">
-                                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span className="whitespace-nowrap">
-                                      {item.metadata?.capturedAt 
-                                        ? formatCapturedTimeWithRecency(item.metadata.capturedAt)
-                                        : (item.timestamp ? formatCapturedTimeWithRecency(item.timestamp) : '')
-                                      }
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              e.preventDefault()
-                              // 원본 포스트 데이터 찾기 (클러스터링된 데이터가 아닌 원본)
-                              const originalPost = vibePosts.find(p => p.id === item.id)
-                              if (originalPost) {
-                                handlePostClick(originalPost)
-                              } else {
-                                // 원본을 찾지 못하면 item 자체를 사용 (이미 원본 포스트의 속성이 포함되어 있음)
-                                handlePostClick(item)
-                              }
-                              setSelectedPin(null)
-                            }}
-                            className="w-full bg-[#ADFF2F] text-black font-semibold py-2 rounded text-xs hover:bg-[#ADFF2F]/90 transition-colors"
-                          >
-                            View Detail →
-                          </button>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  )
-              })
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-10">
-                <p>No location data available</p>
-              </div>
-            )}
-          </MapContainer>
+              }
+            }}
+            onMapClick={() => {
+              setMapZoom(1)
+              setSelectedCluster(null)
+              setSelectedPin(null)
+            }}
+            onClusterClick={(item) => {
+              setSelectedCluster(item)
+              setMapZoom(2)
+            }}
+            onSpotClick={(spot) => {
+              setSelectedDiscoverSpot(spot)
+              setDiscoverDetailFrom('home')
+              setCurrentView('discover-detail')
+            }}
+            onPostClick={(item) => {
+              const originalPost = vibePosts.find((p) => p.id === item.id)
+              if (originalPost) handlePostClick(originalPost)
+              else handlePostClick(item)
+              setSelectedPin(null)
+            }}
+            getSpotPopupHtml={getSpotPopupHtml}
+            getPostPopupHtml={getPostPopupHtml}
+          />
+          <MapControls
+            naverMapRef={naverMapInstanceRef}
+            userLocation={userLocation}
+            showPickedOnlyOnMap={showPickedOnlyOnMap}
+            onTogglePickedOnly={() => setShowPickedOnlyOnMap((prev) => !prev)}
+            pickedPlaceIds={pickedPlaceIds}
+            lang={lang}
+          />
+          {mapItems.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-10 pointer-events-none">
+              <p>{I18N.mapNoLocation[lang]}</p>
+            </div>
+          )}
+          {/* 지도 저작권 (하단 메뉴 바로 위) */}
+          <div className="absolute bottom-1 right-2 z-[1000] text-[10px] text-gray-500">
+            © NAVER Corp.
+          </div>
         </div>
 
         {/* Bottom Navigation */}
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
@@ -3018,39 +3012,39 @@ function App() {
     )
   }
 
-  // Quest View
+  // Quest View - 모바일 430px 통일
   if (currentView === 'quest') {
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
-          <div className="max-w-2xl mx-auto px-4 py-4">
+        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <h1 className="text-2xl font-bold">
               Quest <span className="text-[#ADFF2F]">🎯</span>
             </h1>
             <p className="text-sm text-gray-400 mt-1">
               Complete challenges and earn rewards
-        </p>
-      </div>
+            </p>
+          </div>
         </div>
 
-        <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="max-w-[430px] mx-auto px-4 py-6">
           <div className="text-center py-12">
             <div className="text-6xl mb-4">🎯</div>
             <p className="text-gray-400">Coming Soon</p>
           </div>
         </div>
 
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
 
-  // My View
+  // My View - 모바일 430px 통일
   if (currentView === 'my') {
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        <div className="sticky top-0 bg-black/95 backdrop-blur-sm z-10 border-b border-gray-800">
-          <div className="max-w-2xl mx-auto px-4 py-4">
+        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <h1 className="text-2xl font-bold">
               My Profile <span className="text-[#ADFF2F]">👤</span>
             </h1>
@@ -3060,7 +3054,7 @@ function App() {
           </div>
         </div>
 
-        <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="max-w-[430px] mx-auto px-4 py-6">
           {user ? (
             <div className="space-y-6">
               {/* Profile Card */}
@@ -3091,67 +3085,95 @@ function App() {
                 </button>
               </div>
 
-              {/* Stats Section */}
+              {/* 픽한 장소 모아보기 */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h3 className="text-lg font-bold mb-4">Your Activity</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-[#ADFF2F]">
-                      {vibePosts.filter((p) => p.userId === user.id || p.user === user.id).length}
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">Posts Shared</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-[#ADFF2F]">
-                      {new Set(vibePosts.filter((p) => p.userId === user.id || p.user === user.id).map((p) => p.placeId)).size}
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">Places Visited</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Posts Section */}
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h3 className="text-lg font-bold mb-4">Recent Posts</h3>
-                {vibePosts.filter((p) => p.userId === user.id || p.user === user.id).length > 0 ? (
-                  <div className="space-y-4">
-                    {vibePosts
-                      .filter((p) => p.userId === user.id || p.user === user.id)
-                      .slice(0, 5)
-                      .map((post) => {
-                        const vibeInfo = getVibeInfo(post.vibe)
-                        return (
-                          <div
-                            key={post.id}
-                            onClick={() => handlePostClick(post)}
-                            className="bg-gray-800 border border-gray-700 rounded-lg p-4 cursor-pointer hover:border-[#ADFF2F]/50 transition-colors"
-                          >
-                            <div className="flex items-start gap-3">
-                              <img
-                                src={post.image}
-                                alt={post.placeName}
-                                className="w-20 h-20 rounded-lg object-cover"
-                              />
-                              <div className="flex-1">
-                                <div className="flex items-center justify-between mb-1">
-                                  <h4 className="font-semibold text-sm">{post.placeName}</h4>
-                                  <span className="text-xs">{vibeInfo.emoji}</span>
-                                </div>
-                                <p className="text-xs text-gray-400 mb-2">{vibeInfo.label}</p>
-                                <p className="text-xs text-gray-500">
-                                  {post.metadata?.capturedAt 
-                                    ? `${formatDate(post.metadata.capturedAt)} ${formatCapturedTime(post.metadata.capturedAt)}`
-                                    : getTimeAgo(post.timestamp)
-                                  }
-                                </p>
-                              </div>
+                <h3 className="text-lg font-bold mb-4">
+                  {lang === 'ko' ? '픽한 장소' : 'Picked Places'}
+                </h3>
+                {pickedPlaceIds.length > 0 ? (
+                  <div className="space-y-3">
+                    {hotSpots
+                      .filter((s) => pickedPlaceIds.includes(s.id))
+                      .map((spot) => (
+                        <div
+                          key={spot.id}
+                          onClick={() => {
+                            setSelectedDiscoverSpot({ ...spot, name_en: spot.nameEn })
+                            setDiscoverDetailFrom('my')
+                            setCurrentView('discover-detail')
+                          }}
+                          className="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-lg p-3 cursor-pointer hover:border-[#ADFF2F]/50 transition-colors"
+                        >
+                          {spot.thumbnail_url ? (
+                            <img
+                              src={spot.thumbnail_url}
+                              alt={spot.name}
+                              className="w-14 h-14 rounded-lg object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 rounded-lg bg-gray-700 flex items-center justify-center text-gray-500 text-xs flex-shrink-0">
+                              No image
                             </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">
+                              {lang === 'en' && spot.nameEn ? spot.nameEn : spot.name}
+                            </p>
                           </div>
-                        )
-                      })}
+                          <span className="text-[#ADFF2F]">★</span>
+                        </div>
+                      ))}
                   </div>
                 ) : (
-                  <p className="text-gray-400 text-center py-4">No posts yet</p>
+                  <p className="text-gray-400 text-center py-4 text-sm">
+                    {lang === 'ko' ? '디스커버에서 장소를 픽해 보세요.' : 'Pick places from Discover.'}
+                  </p>
+                )}
+              </div>
+
+              {/* 댓글 단 장소 모아보기 */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <h3 className="text-lg font-bold mb-4">
+                  {lang === 'ko' ? '댓글 단 장소' : 'Places I Commented'}
+                </h3>
+                {placeIdsCommentedByUser.length > 0 ? (
+                  <div className="space-y-3">
+                    {hotSpots
+                      .filter((s) => placeIdsCommentedByUser.includes(s.id))
+                      .map((spot) => (
+                        <div
+                          key={spot.id}
+                          onClick={() => {
+                            setSelectedDiscoverSpot({ ...spot, name_en: spot.nameEn })
+                            setDiscoverDetailFrom('my')
+                            setCurrentView('discover-detail')
+                          }}
+                          className="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-lg p-3 cursor-pointer hover:border-[#ADFF2F]/50 transition-colors"
+                        >
+                          {spot.thumbnail_url ? (
+                            <img
+                              src={spot.thumbnail_url}
+                              alt={spot.name}
+                              className="w-14 h-14 rounded-lg object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 rounded-lg bg-gray-700 flex items-center justify-center text-gray-500 text-xs flex-shrink-0">
+                              No image
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">
+                              {lang === 'en' && spot.nameEn ? spot.nameEn : spot.name}
+                            </p>
+                          </div>
+                          <span className="text-gray-400 text-sm">💬</span>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-center py-4 text-sm">
+                    {lang === 'ko' ? '장소 상세에서 댓글을 남긴 곳이 여기 모입니다.' : 'Places you commented on will appear here.'}
+                  </p>
                 )}
               </div>
             </div>
@@ -3175,7 +3197,7 @@ function App() {
           )}
         </div>
 
-        <BottomNav currentView={currentView} onNavClick={handleNavClick} />
+        <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
     )
   }
@@ -3186,10 +3208,10 @@ function App() {
       <div className="text-center">
         <p className="text-gray-400 mb-4">Loading...</p>
         <button
-          onClick={() => setCurrentView('home')}
+          onClick={() => setCurrentView('discover')}
           className="px-4 py-2 bg-[#ADFF2F] text-black font-semibold rounded-lg hover:bg-[#ADFF2F]/90"
         >
-          Go to Home
+          Go to Discover
         </button>
       </div>
     </div>
@@ -3620,6 +3642,253 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
             </button>
           </div>
       </div>
+    </div>
+  )
+}
+
+// 댓글 섹션 컴포넌트 (Discover 상세 하단)
+function PlaceCommentsSection({ spot, user }) {
+  const [comments, setComments] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [content, setContent] = useState('')
+  const [files, setFiles] = useState([]) // File[]
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [previewIndex, setPreviewIndex] = useState(null) // 이미지 팝업용 {commentIdx, imageIdx}
+
+  useEffect(() => {
+    const load = async () => {
+      if (!spot?.id) return
+      setIsLoading(true)
+      try {
+        const data = await db.getPlaceComments(spot.id)
+        setComments(Array.isArray(data) ? data : [])
+      } catch (err) {
+        console.error('Failed to load comments:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    load()
+  }, [spot?.id])
+
+  const handleFileChange = (e) => {
+    const selected = Array.from(e.target.files || [])
+    if (!selected.length) return
+    const remaining = Math.max(0, 5 - files.length)
+    const toAdd = selected.slice(0, remaining)
+    setFiles((prev) => [...prev, ...toAdd])
+    e.target.value = ''
+  }
+
+  const handleRemoveFile = (index) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!spot?.id) return
+    if (!user) {
+      setError('로그인 후 댓글을 작성할 수 있습니다.')
+      return
+    }
+    if (!content.trim() && files.length === 0) {
+      setError('내용이나 사진 중 하나는 있어야 합니다.')
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      setError('')
+
+      // 이미지 업로드
+      const imageUrls = []
+      for (const file of files) {
+        const timestamp = Date.now()
+        const ext = file.name.split('.').pop() || 'jpg'
+        const safeName = (spot.name || 'place').replace(/\s+/g, '_')
+        const path = `comments/${spot.id}/${timestamp}_${safeName}.${ext}`
+        const { data: uploadData } = await db.uploadImage(file, path)
+        imageUrls.push(uploadData.publicUrl)
+      }
+
+      // Supabase에 댓글 저장
+      const comment = await db.createPlaceComment({
+        placeId: spot.id,
+        userId: user.id,
+        content,
+        imageUrls,
+      })
+
+      // 목록 갱신 (위에 추가)
+      setComments((prev) => [comment, ...prev])
+      setContent('')
+      setFiles([])
+    } catch (err) {
+      console.error('Failed to submit comment:', err)
+      setError(err.message || '댓글 저장 중 오류가 발생했습니다.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const renderCommentImages = (comment, cIdx) => {
+    const imgs = Array.isArray(comment.images) ? comment.images : []
+    if (!imgs.length) return null
+    return (
+      <div className="mt-2 flex flex-wrap gap-2">
+        {imgs.map((url, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setPreviewIndex({ commentIndex: cIdx, imageIndex: i })}
+            className="w-16 h-16 rounded-lg overflow-hidden border border-gray-700 bg-gray-900 flex items-center justify-center"
+          >
+            <img src={url} alt="" className="w-full h-full object-cover" />
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  const renderImageModal = () => {
+    if (!previewIndex) return null
+    const { commentIndex, imageIndex } = previewIndex
+    const comment = comments[commentIndex]
+    if (!comment) return null
+    const imgs = Array.isArray(comment.images) ? comment.images : []
+    if (!imgs.length) return null
+
+    const current = imgs[imageIndex] || imgs[0]
+
+    const go = (delta) => {
+      const n = imgs.length
+      const next = ((imageIndex + delta) % n + n) % n
+      setPreviewIndex({ commentIndex, imageIndex: next })
+    }
+
+    return (
+      <div className="fixed inset-0 z-[2000] bg-black/90 flex items-center justify-center">
+        <button
+          type="button"
+          className="absolute top-4 right-4 text-gray-300 hover:text-white"
+          onClick={() => setPreviewIndex(null)}
+        >
+          ✕
+        </button>
+        <div className="relative max-w-full max-h-full px-8 flex items-center justify-center">
+          <button
+            type="button"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl text-gray-300 hover:text-white px-2 py-1"
+            onClick={() => go(-1)}
+          >
+            ‹
+          </button>
+          <img src={current} alt="" className="max-w-full max-h-[80vh] object-contain rounded-lg" />
+          <button
+            type="button"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-2xl text-gray-300 hover:text-white px-2 py-1"
+            onClick={() => go(1)}
+          >
+            ›
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-[430px] mx-auto px-4 pb-6 pt-4">
+      <h2 className="text-sm font-semibold text-gray-200 mb-2">댓글</h2>
+
+      {/* 작성 폼 */}
+      <div className="mb-4">
+        {!user ? (
+          <p className="text-xs text-gray-400">
+            로그인 후 댓글을 작성할 수 있습니다.
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-2">
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-sm text-white"
+              placeholder="장소에 대한 댓글을 남겨주세요..."
+            />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <label className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-gray-700 text-xs text-gray-300 cursor-pointer hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F]">
+                  <span>📷</span>
+                  <span>사진 추가 ({files.length}/5)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </label>
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-3 py-1.5 rounded-full bg-[#ADFF2F] text-black text-xs font-semibold hover:bg-[#ADFF2F]/90 disabled:opacity-50"
+              >
+                {isSubmitting ? '등록 중...' : '등록'}
+              </button>
+            </div>
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-1">
+                {files.map((file, i) => (
+                  <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-700 bg-gray-900 flex items-center justify-center">
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt="preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFile(i)}
+                      className="absolute -top-1 -right-1 bg-black/80 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+          </form>
+        )}
+      </div>
+
+      {/* 댓글 리스트 */}
+      <div className="space-y-3">
+        {isLoading ? (
+          <p className="text-xs text-gray-400">댓글을 불러오는 중입니다...</p>
+        ) : comments.length === 0 ? (
+          <p className="text-xs text-gray-500">첫 댓글을 남겨보세요.</p>
+        ) : (
+          comments.map((c, idx) => (
+            <div key={c.id} className="border border-gray-800 rounded-lg bg-gray-900/60 px-3 py-2 text-xs text-gray-200">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-[11px] text-gray-300">
+                  {/* 향후 프로필 연동 시 닉네임 표시 가능 */}
+                  익명
+                </span>
+                <span className="text-[10px] text-gray-500">
+                  {c.created_at ? formatCapturedTimeWithRecency(c.created_at) : ''}
+                </span>
+              </div>
+              <p className="whitespace-pre-line">{c.content}</p>
+              {renderCommentImages(c, idx)}
+            </div>
+          ))
+        )}
+      </div>
+
+      {renderImageModal()}
     </div>
   )
 }
@@ -4105,18 +4374,17 @@ function PostVibeModal({
 }
 
 // Bottom Navigation Component
-function BottomNav({ currentView, onNavClick }) {
+function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
   const navItems = [
-    { id: 'discover', label: 'Discover', icon: '⭐' },
-    { id: 'feed', label: 'Feed', icon: '📱' },
-    { id: 'map', label: 'Map', icon: '🗺️' },
-    { id: 'my', label: 'My', icon: '👤' },
+    { id: 'discover', labelKey: 'navDiscover', icon: '⭐' },
+    { id: 'map', labelKey: 'navMap', icon: '🗺️' },
+    { id: 'my', labelKey: 'navMy', icon: '👤' },
   ]
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-gray-800 z-20">
-      <div className="max-w-2xl mx-auto">
-        <div className="grid grid-cols-4 gap-1 px-2 py-3">
+      <div className="max-w-[430px] mx-auto">
+        <div className="grid grid-cols-3 gap-1 px-2 py-3">
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -4130,7 +4398,7 @@ function BottomNav({ currentView, onNavClick }) {
               `}
             >
               <span className="text-xl">{item.icon}</span>
-              <span className="text-xs font-medium">{item.label}</span>
+              <span className="text-xs font-medium">{I18N[item.labelKey][lang]}</span>
             </button>
           ))}
         </div>

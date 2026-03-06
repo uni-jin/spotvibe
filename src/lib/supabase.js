@@ -165,6 +165,35 @@ export const db = {
       })
     }
 
+    // 댓글 집계: 장소별 댓글 수 및 최근 댓글 시간
+    let commentStatsByPlace = {}
+    try {
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('place_comments')
+        .select('place_id, created_at')
+        .in('place_id', placeIds)
+
+      if (!commentsError && Array.isArray(commentsData)) {
+        commentsData.forEach((row) => {
+          if (!commentStatsByPlace[row.place_id]) {
+            commentStatsByPlace[row.place_id] = {
+              count: 0,
+              latestCommentAt: null,
+            }
+          }
+          const stat = commentStatsByPlace[row.place_id]
+          stat.count += 1
+          const createdAt = row.created_at ? new Date(row.created_at).getTime() : 0
+          if (!stat.latestCommentAt || createdAt > stat.latestCommentAt) {
+            stat.latestCommentAt = createdAt
+          }
+        })
+      }
+    } catch (err) {
+      console.error('Error aggregating place comments:', err)
+      commentStatsByPlace = {}
+    }
+
     // 복수 노출기간 또는 단일 기간 기준 노출 상태
     const withStatus = placesData.map((place) => {
       const display_periods = periodsByPlace[place.id] || null
@@ -173,7 +202,8 @@ export const db = {
         place.display_start_date,
         place.display_end_date
       )
-      return { place, display_periods, displayStatus: status }
+      const commentStat = commentStatsByPlace[place.id] || { count: 0, latestCommentAt: null }
+      return { place, display_periods, displayStatus: status, commentStat }
     })
 
     // Hot Spots Now에는 진행중/시작 예정(및 무제한)만 노출, 종료는 제외
@@ -184,7 +214,7 @@ export const db = {
         item.displayStatus === 'unlimited'
     )
 
-    return filtered.map(({ place, display_periods, displayStatus }) => ({
+    return filtered.map(({ place, display_periods, displayStatus, commentStat }) => ({
       id: place.id,
       name: place.name,
       nameEn: place.name_en,
@@ -195,6 +225,7 @@ export const db = {
       lng: place.lng,
       thumbnail_url: place.thumbnail_url,
       description: place.description,
+      created_at: place.created_at,
       display_start_date: place.display_start_date,
       display_end_date: place.display_end_date,
       display_periods: display_periods || undefined,
@@ -202,6 +233,8 @@ export const db = {
       phone: place.phone,
       hashtags: place.hashtags || [],
       displayStatus,
+      commentCount: commentStat.count || 0,
+      latestCommentAt: commentStat.latestCommentAt || null,
     }))
   },
 
@@ -310,6 +343,125 @@ export const db = {
     }
 
     return data
+  },
+
+  // Place comments
+  async getPlaceComments(placeId) {
+    if (!placeId) return []
+    const { data, error } = await supabase
+      .from('place_comments')
+      .select('*')
+      .eq('place_id', placeId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching place comments:', error)
+      return []
+    }
+
+    return data || []
+  },
+
+  async createPlaceComment({ placeId, userId, content, imageUrls }) {
+    if (!placeId || !userId || !content.trim()) {
+      throw new Error('placeId, userId, content are required')
+    }
+
+    const payload = {
+      place_id: placeId,
+      user_id: userId,
+      content: content.trim(),
+      images: Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls.slice(0, 5) : null,
+    }
+
+    const { data, error } = await supabase
+      .from('place_comments')
+      .insert(payload)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Error creating place comment:', error)
+      throw error
+    }
+
+    return data
+  },
+
+  // --- User place picks (Pick한 장소) ---
+  async getPickedPlaceIds(userId) {
+    if (!userId) return []
+    const { data, error } = await supabase
+      .from('user_place_picks')
+      .select('place_id')
+      .eq('user_id', userId)
+
+    if (error) {
+      console.error('Error fetching picked places:', error)
+      return []
+    }
+    return (data || []).map((row) => row.place_id)
+  },
+
+  async isPlacePickedByUser(placeId, userId) {
+    if (!placeId || !userId) return false
+    const { data, error } = await supabase
+      .from('user_place_picks')
+      .select('id')
+      .eq('place_id', placeId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error checking pick status:', error)
+      return false
+    }
+    return !!data
+  },
+
+  async togglePlacePick(placeId, userId) {
+    if (!userId) {
+      throw new Error('User must be logged in to pick places')
+    }
+    const isPicked = await this.isPlacePickedByUser(placeId, userId)
+    if (isPicked) {
+      const { error } = await supabase
+        .from('user_place_picks')
+        .delete()
+        .eq('place_id', placeId)
+        .eq('user_id', userId)
+      if (error) {
+        console.error('Error unpicking place:', error)
+        throw error
+      }
+      return { picked: false }
+    } else {
+      const { error } = await supabase
+        .from('user_place_picks')
+        .insert({ place_id: placeId, user_id: userId })
+      if (error) {
+        console.error('Error picking place:', error)
+        throw error
+      }
+      return { picked: true }
+    }
+  },
+
+  // 댓글 단 장소 ID 목록 (마이페이지용)
+  async getPlaceIdsCommentedByUser(userId) {
+    if (!userId) return []
+    const { data, error } = await supabase
+      .from('place_comments')
+      .select('place_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching places commented by user:', error)
+      return []
+    }
+    const ids = (data || []).map((row) => row.place_id)
+    return [...new Set(ids)]
   },
 
   // Get like count for a post

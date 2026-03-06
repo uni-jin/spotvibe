@@ -3,9 +3,52 @@ import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../li
 import { db } from '../../lib/supabase'
 import { getDisplayStatusFromPeriods, getDisplayPeriodForAdminList, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
 import imageCompression from 'browser-image-compression'
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { useNaverMapSdk } from '../../lib/useNaverMapSdk'
+
+function AdminNaverMap({ lat, lng, onChangeLatLng }) {
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+  const markerRef = useRef(null)
+  const sdkReady = useNaverMapSdk()
+
+  useEffect(() => {
+    if (!sdkReady || !window.naver?.maps || !mapRef.current || mapInstanceRef.current) return
+
+    const center = (lat && lng)
+      ? new naver.maps.LatLng(parseFloat(lat), parseFloat(lng))
+      : new naver.maps.LatLng(37.5446, 127.0559)
+
+    const map = new naver.maps.Map(mapRef.current, {
+      center,
+      zoom: (lat && lng) ? 16 : 13,
+      minZoom: 6,
+    })
+    mapInstanceRef.current = map
+
+    const marker = new naver.maps.Marker({ position: center, map })
+    markerRef.current = marker
+
+    naver.maps.Event.addListener(map, 'click', (e) => {
+      const pos = e.coord
+      marker.setPosition(pos)
+      onChangeLatLng(pos.y.toString(), pos.x.toString())
+    })
+  }, [sdkReady])
+
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    const marker = markerRef.current
+    if (!map || !marker || !lat || !lng) return
+    const pos = new naver.maps.LatLng(parseFloat(lat), parseFloat(lng))
+    marker.setPosition(pos)
+  }, [lat, lng])
+
+  return (
+    <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '600px' }}>
+      <div ref={mapRef} className="w-full h-full" />
+    </div>
+  )
+}
 
 const PlacesManagement = ({ resetTrigger = 0 }) => {
   const [places, setPlaces] = useState([])
@@ -486,9 +529,12 @@ function getTodayDateString() {
 const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeletePlace }) => {
   const initialPeriods = initialDisplayPeriods(place)
   const [formData, setFormData] = useState({
-    name: place?.name || '',
+    // 다국어 장소명/설명: name(ko), name_en(en), description(ko), description_en(en)
+    name_ko: place?.name || '',
+    name_en: place?.name_en || '',
     type: place?.type || '',
-    description: place?.description || '',
+    description_ko: place?.description || '',
+    description_en: place?.description_en || '',
     lat: place?.lat || '',
     lng: place?.lng || '',
     is_active: place?.is_active !== undefined ? place.is_active : true,
@@ -619,53 +665,6 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   }
 
   // Leaflet 기본 아이콘 설정
-  useEffect(() => {
-    // Fix for Leaflet default icon issue
-    if (typeof window !== 'undefined' && L && L.Icon && L.Icon.Default && L.Icon.Default.prototype) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete L.Icon.Default.prototype._getIconUrl
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      })
-    }
-  }, [])
-
-  // Map click handler component
-  const MapClickHandler = () => {
-    const map = useMap()
-    
-    useMapEvents({
-      click: (e) => {
-        const { lat, lng } = e.latlng
-        // 지도 클릭 시에는 mapCenter를 업데이트하지 않음 (지도 재생성 방지)
-        setMarkerPosition([lat, lng])
-        // formData만 업데이트 (mapCenter는 업데이트하지 않음)
-        setFormData(prev => ({
-          ...prev,
-          lat: lat.toString(),
-          lng: lng.toString(),
-        }))
-      },
-    })
-    return null
-  }
-
-  // 마커 위치로 지도 이동 (주소 검색 등으로 마커가 갱신되면 해당 위치로 이동)
-  const MapFlyToMarker = ({ position }) => {
-    const map = useMap()
-    useEffect(() => {
-      if (!position) return
-      try {
-        map.flyTo(position, map.getZoom() || 16, { duration: 0.5 })
-      } catch {
-        map.setView(position, map.getZoom() || 16)
-      }
-    }, [position, map])
-    return null
-  }
-  
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -709,8 +708,8 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     setSuccess('')
 
     // Validation
-    if (!formData.name.trim()) {
-      setError('장소명을 입력해주세요.')
+    if (!formData.name_ko.trim()) {
+      setError('장소명(한국어)을 입력해주세요.')
       return
     }
 
@@ -752,16 +751,24 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             })
             .filter((p) => p.start != null && p.end != null)
 
-      const result = await savePlace(
-        {
-          ...formData,
-          name_en: null,
-          thumbnail_url: thumbnailUrl,
-          display_periods,
-          hashtags: selectedTags,
-        },
-        place?.id || null
-      )
+      const payload = {
+        name: formData.name_ko.trim(),
+        name_en: formData.name_en?.trim() || null,
+        type: formData.type,
+        description: formData.description_ko || '',
+        // description_en은 추후 백엔드 확장 시 전달
+        lat: formData.lat,
+        lng: formData.lng,
+        is_active: formData.is_active,
+        display_periods,
+        unlimited_display: formData.unlimited_display,
+        info_url: formData.info_url,
+        phone: formData.phone,
+        thumbnail_url: thumbnailUrl,
+        hashtags: selectedTags,
+      }
+
+      const result = await savePlace(payload, place?.id || null)
 
       if (!result.success) {
         throw new Error(result.error || '장소 저장에 실패했습니다.')
@@ -806,19 +813,33 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           </select>
         </div>
 
-        {/* Name */}
-        <div>
-          <label className="block text-sm font-medium mb-2 text-gray-300">
-            장소명 (영문) <span className="text-red-400">*</span>
-          </label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => handleInputChange('name', e.target.value)}
-            required
-            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
-            placeholder="예: Dior Seongsu"
-          />
+        {/* Name (KO/EN) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              장소명 (한국어) <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.name_ko}
+              onChange={(e) => handleInputChange('name_ko', e.target.value)}
+              required
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="예: 디올 성수 팝업스토어"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-300">
+              장소명 (영문) <span className="text-gray-500 text-xs">(선택)</span>
+            </label>
+            <input
+              type="text"
+              value={formData.name_en}
+              onChange={(e) => handleInputChange('name_en', e.target.value)}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+              placeholder="예: Dior Seongsu Pop-up"
+            />
+          </div>
         </div>
 
         {/* Thumbnail */}
@@ -888,53 +909,14 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             지도를 클릭하여 위치를 선택하거나, 주소 검색 또는 아래 입력란에 직접 좌표를 입력할 수 있습니다.
           </p>
           
-          {/* Map */}
-          <div className="mb-4 rounded-lg overflow-hidden border border-gray-700" style={{ height: '600px', position: 'relative' }}>
-            {typeof window !== 'undefined' && (
-              <MapContainer
-                key="place-form-map" // 고정 key 사용 (지도 재생성 방지)
-                center={mapCenter}
-                zoom={mapZoom}
-                style={{ height: '100%', width: '100%', zIndex: 1 }}
-                className="dark-map"
-                scrollWheelZoom={true}
-                whenCreated={(mapInstance) => {
-                  // 지도가 생성된 후 초기화 확인
-                  setTimeout(() => {
-                    mapInstance.invalidateSize()
-                  }, 100)
-                }}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  className="dark-tiles"
-                />
-                <MapClickHandler />
-                {markerPosition && <MapFlyToMarker position={markerPosition} />}
-                {markerPosition && (
-                  <Marker
-                    position={markerPosition}
-                    draggable={true}
-                    eventHandlers={{
-                      dragend: (e) => {
-                        const marker = e.target
-                        const position = marker.getLatLng()
-                        // 드래그 종료 시에는 mapCenter를 업데이트하지 않음 (지도 재생성 방지)
-                        setMarkerPosition([position.lat, position.lng])
-                        // formData만 업데이트 (mapCenter는 업데이트하지 않음)
-                        setFormData(prev => ({
-                          ...prev,
-                          lat: position.lat.toString(),
-                          lng: position.lng.toString(),
-                        }))
-                      },
-                    }}
-                  />
-                )}
-              </MapContainer>
-            )}
-          </div>
+          {/* Map (Naver) */}
+          <AdminNaverMap
+            lat={formData.lat}
+            lng={formData.lng}
+            onChangeLatLng={(newLat, newLng) => {
+              setFormData(prev => ({ ...prev, lat: newLat, lng: newLng }))
+            }}
+          />
 
           {/* Coordinate inputs */}
           <div className="grid grid-cols-2 gap-4">
@@ -967,18 +949,18 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           </div>
         </div>
 
-        {/* Description & Links */}
+        {/* Description (KO) & Links */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col h-full">
             <label className="block text-sm font-medium mb-2 text-gray-300">
-              설명 <span className="text-gray-500 text-xs">(선택)</span>
+              설명 (한국어) <span className="text-gray-500 text-xs">(선택)</span>
             </label>
             <textarea
-              value={formData.description}
-              onChange={(e) => handleInputChange('description', e.target.value)}
+              value={formData.description_ko}
+              onChange={(e) => handleInputChange('description_ko', e.target.value)}
               rows={6}
               className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none flex-1 min-h-[160px]"
-              placeholder="장소에 대한 설명을 입력하세요..."
+              placeholder="장소에 대한 설명을 한국어로 입력하세요..."
             />
           </div>
           <div className="space-y-3">
@@ -1004,6 +986,19 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                 onChange={(e) => handleInputChange('phone', e.target.value)}
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
                 placeholder="예: 02-123-4567"
+              />
+            </div>
+            {/* Description (English) – 추후 사용자 화면에서 사용 예정 */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
+                설명 (영어) <span className="text-gray-500 text-xs">(선택)</span>
+              </label>
+              <textarea
+                value={formData.description_en}
+                onChange={(e) => handleInputChange('description_en', e.target.value)}
+                rows={4}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
+                placeholder="Description in English (for international users)..."
               />
             </div>
             {/* Tags from common codes */}
