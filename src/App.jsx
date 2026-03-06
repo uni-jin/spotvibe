@@ -329,7 +329,7 @@ function LiveRadarNaverMap({
   return <div ref={mapRef} className="w-full h-full" />
 }
 
-/** 지도 화면에서 하단 메뉴 영역 높이(px). 메뉴·safe-area와 겹치지 않도록 여유 있게 설정 */
+/** 지도 화면에서 하단 고정 메뉴 영역 높이(px). 지도·버튼은 이 높이만큼 제외하고 그 위에만 노출 (메뉴+safe-area 여유) */
 const BOTTOM_NAV_HEIGHT = 100
 
 function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
@@ -2847,9 +2847,12 @@ function App() {
       : [37.5446, 127.0559] // 기본값: 성수동
 
     return (
-      <div className="fixed inset-0 h-screen w-full bg-black text-white overflow-hidden">
-        {/* Header - 고정, 스크롤 시 움직이지 않음 */}
-        <div className="absolute top-0 left-0 right-0 min-h-[96px] flex flex-col justify-center bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
+      <div
+        className="fixed inset-0 w-full bg-black text-white overflow-hidden flex flex-col"
+        style={{ paddingBottom: BOTTOM_NAV_HEIGHT }}
+      >
+        {/* Header - 고정 */}
+        <div className="flex-shrink-0 min-h-[96px] flex flex-col justify-center bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
           <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
@@ -2905,14 +2908,8 @@ function App() {
           </div>
         </div>
 
-        {/* Naver Map - 헤더 아래 ~ 하단 메뉴 위까지만 차지 (bottom으로 경계 고정) */}
-        <div
-          className="absolute left-0 right-0 overflow-hidden"
-          style={{
-            top: '96px',
-            bottom: `${BOTTOM_NAV_HEIGHT}px`,
-          }}
-        >
+        {/* Naver Map - 헤더 아래 ~ 패딩(하단 메뉴 높이) 위까지만 차지, flex로 영역 고정 */}
+        <div className="flex-1 min-h-0 relative overflow-hidden">
           <LiveRadarNaverMap
             center={mapCenter}
             mapItems={mapItems}
