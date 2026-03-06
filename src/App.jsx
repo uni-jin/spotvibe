@@ -22,6 +22,37 @@ const I18N = {
   mapTitle: { ko: '라이브 레이더', en: 'Live Radar' },
   mapActiveSignals: { ko: '위치 정보가 있는 포스트', en: 'active signals' },
   mapNoLocation: { ko: '위치 데이터가 없습니다.', en: 'No location data available' },
+
+  // 댓글 영역
+  commentTitle: { ko: '댓글', en: 'Comments' },
+  commentLoginRequired: {
+    ko: '로그인 후 댓글을 작성할 수 있습니다.',
+    en: 'Please log in to write a comment.',
+  },
+  commentPlaceholder: {
+    ko: '장소에 대한 댓글을 남겨주세요...',
+    en: 'Leave a comment about this place...',
+  },
+  commentAddPhoto: { ko: '사진 추가', en: 'Add photo' },
+  commentSubmit: { ko: '등록', en: 'Post' },
+  commentSubmitting: { ko: '등록 중...', en: 'Posting...' },
+  commentLoading: {
+    ko: '댓글을 불러오는 중입니다...',
+    en: 'Loading comments...',
+  },
+  commentEmpty: {
+    ko: '첫 댓글을 남겨보세요.',
+    en: 'Be the first to comment.',
+  },
+  commentErrorNeedContent: {
+    ko: '내용이나 사진 중 하나는 있어야 합니다.',
+    en: 'You need text or at least one photo.',
+  },
+  commentErrorGeneric: {
+    ko: '댓글 저장 중 오류가 발생했습니다.',
+    en: 'An error occurred while saving the comment.',
+  },
+  commentAnonymous: { ko: '익명', en: 'Anonymous' },
 }
 
 // 사용자 지도용 컴포넌트 — App 바깥에 두어 줌 시 setLeafletZoom 리렌더만 하고 언마운트/재마운트 되지 않도록 함 (깜빡임 방지)
@@ -329,13 +360,13 @@ function LiveRadarNaverMap({
   return <div ref={mapRef} className="w-full h-full" />
 }
 
-/** 지도 화면에서 하단 고정 메뉴 영역 높이(px). 지도·버튼은 이 높이만큼 제외하고 그 위에만 노출 (메뉴+safe-area 여유) */
-const BOTTOM_NAV_HEIGHT = 100
+/** 하단 고정 메뉴 내용 영역 높이(px). 지도 paddingBottom과 동일하게 맞춰 빈틈 제거 */
+const BOTTOM_NAV_CONTENT_HEIGHT = 72
 
 function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onTogglePickedOnly, pickedPlaceIds, lang }) {
   const hasPicked = Array.isArray(pickedPlaceIds) && pickedPlaceIds.length > 0
   return (
-    <div className="absolute right-3 bottom-8 z-[1100] flex flex-col gap-2">
+    <div className="absolute right-3 z-[1100] flex flex-col gap-2" style={{ bottom: '40px' }}>
       {/* 픽한 장소만 보기 필터 (로그인 + 픽한 장소가 있을 때 표시) */}
       {hasPicked && (
         <button
@@ -2060,12 +2091,23 @@ function App() {
   // Discover Detail View - Hotspot 상세
   if (currentView === 'discover-detail') {
     if (!selectedDiscoverSpot) {
-      // 선택된 스팟이 없으면 Discover로 되돌리기
-      setCurrentView('discover')
+      setCurrentView(discoverDetailFrom === 'my' ? 'my' : 'discover')
       return null
     }
 
-    const spot = selectedDiscoverSpot
+    // 마이페이지 "댓글 단 장소"에서 진입 시 hotSpots에서 동일 id로 다시 조회해 구조 일치·검은 화면 방지
+    const resolvedSpot =
+      discoverDetailFrom === 'my' && selectedDiscoverSpot?.id != null
+        ? hotSpots.find((s) => s.id === selectedDiscoverSpot.id) || selectedDiscoverSpot
+        : selectedDiscoverSpot
+    const spot = resolvedSpot
+      ? { ...resolvedSpot, name_en: resolvedSpot.name_en ?? resolvedSpot.nameEn }
+      : selectedDiscoverSpot
+    if (!spot?.id) {
+      setCurrentView(discoverDetailFrom === 'my' ? 'my' : 'discover')
+      setSelectedDiscoverSpot(null)
+      return null
+    }
     const dday = getDDayBadgeLabel(spot)
     const now = new Date()
     const vibeFresh = (() => {
@@ -2267,7 +2309,12 @@ function App() {
           </div>
 
           {/* 댓글 섹션 (댓글 목록 + 작성) */}
-          <PlaceCommentsSection spot={spot} user={user} />
+          <PlaceCommentsSection
+            spot={spot}
+            user={user}
+            formatCapturedTimeWithRecency={formatCapturedTimeWithRecency}
+            lang={lang}
+          />
         </div>
 
           <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
@@ -2849,7 +2896,7 @@ function App() {
     return (
       <div
         className="fixed inset-0 w-full bg-black text-white overflow-hidden flex flex-col"
-        style={{ paddingBottom: BOTTOM_NAV_HEIGHT }}
+        style={{ paddingBottom: `calc(${BOTTOM_NAV_CONTENT_HEIGHT}px + env(safe-area-inset-bottom, 0px))` }}
       >
         {/* Header - 고정 */}
         <div className="flex-shrink-0 min-h-[96px] flex flex-col justify-center bg-black/80 backdrop-blur-sm z-[1000] border-b border-[#ADFF2F]/30">
@@ -2908,8 +2955,8 @@ function App() {
           </div>
         </div>
 
-        {/* Naver Map - 헤더 아래 ~ 패딩(하단 메뉴 높이) 위까지만 차지, flex로 영역 고정 */}
-        <div className="flex-1 min-h-0 relative overflow-hidden">
+        {/* Naver Map - 하단 패딩으로 네이버 로고·축척이 메뉴와 붙지 않고 그 위에 노출 */}
+        <div className="flex-1 min-h-0 relative overflow-hidden pb-4">
           <LiveRadarNaverMap
             center={mapCenter}
             mapItems={mapItems}
@@ -2961,10 +3008,6 @@ function App() {
               <p>{I18N.mapNoLocation[lang]}</p>
             </div>
           )}
-          {/* 지도 저작권 - 지도 영역 하단(하단 메뉴 바로 위)에 노출 */}
-          <div className="absolute bottom-2 right-2 z-[1000] text-[10px] text-gray-500">
-            © NAVER Corp.
-          </div>
         </div>
 
         {/* Bottom Navigation - 고정 */}
@@ -3647,14 +3690,17 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
 }
 
 // 댓글 섹션 컴포넌트 (Discover 상세 하단)
-function PlaceCommentsSection({ spot, user }) {
+function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang }) {
   const [comments, setComments] = useState([])
+  const formatTime = formatCapturedTimeWithRecency ?? ((date) => (date ? new Date(date).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : ''))
   const [isLoading, setIsLoading] = useState(false)
   const [content, setContent] = useState('')
   const [files, setFiles] = useState([]) // File[]
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [previewIndex, setPreviewIndex] = useState(null) // 이미지 팝업용 {commentIdx, imageIdx}
+
+  const [profileMap, setProfileMap] = useState({}) // userId -> { full_name, avatar_url }
 
   useEffect(() => {
     const load = async () => {
@@ -3671,6 +3717,25 @@ function PlaceCommentsSection({ spot, user }) {
     }
     load()
   }, [spot?.id])
+
+  // 댓글 작성자 프로필 로드
+  useEffect(() => {
+    const userIds = [...new Set((comments || []).map((c) => c.user_id).filter(Boolean))]
+    if (!userIds.length) return
+    let cancelled = false
+    const load = async () => {
+      const map = {}
+      await Promise.all(
+        userIds.map(async (uid) => {
+          const profile = await db.getUserProfile(uid)
+          if (!cancelled && profile) map[uid] = { full_name: profile.full_name, avatar_url: profile.avatar_url }
+        })
+      )
+      if (!cancelled) setProfileMap((prev) => ({ ...prev, ...map }))
+    }
+    load()
+    return () => { cancelled = true }
+  }, [comments])
 
   const handleFileChange = (e) => {
     const selected = Array.from(e.target.files || [])
@@ -3689,11 +3754,11 @@ function PlaceCommentsSection({ spot, user }) {
     e.preventDefault()
     if (!spot?.id) return
     if (!user) {
-      setError('로그인 후 댓글을 작성할 수 있습니다.')
+      setError(I18N.commentLoginRequired[lang])
       return
     }
     if (!content.trim() && files.length === 0) {
-      setError('내용이나 사진 중 하나는 있어야 합니다.')
+      setError(I18N.commentErrorNeedContent[lang])
       return
     }
 
@@ -3726,7 +3791,7 @@ function PlaceCommentsSection({ spot, user }) {
       setFiles([])
     } catch (err) {
       console.error('Failed to submit comment:', err)
-      setError(err.message || '댓글 저장 중 오류가 발생했습니다.')
+      setError(err.message || I18N.commentErrorGeneric[lang])
     } finally {
       setIsSubmitting(false)
     }
@@ -3799,13 +3864,15 @@ function PlaceCommentsSection({ spot, user }) {
 
   return (
     <div className="max-w-[430px] mx-auto px-4 pb-6 pt-4">
-      <h2 className="text-sm font-semibold text-gray-200 mb-2">댓글</h2>
+      <h2 className="text-sm font-semibold text-gray-200 mb-2">
+        {I18N.commentTitle[lang]}
+      </h2>
 
       {/* 작성 폼 */}
       <div className="mb-4">
         {!user ? (
           <p className="text-xs text-gray-400">
-            로그인 후 댓글을 작성할 수 있습니다.
+            {I18N.commentLoginRequired[lang]}
           </p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-2">
@@ -3814,13 +3881,13 @@ function PlaceCommentsSection({ spot, user }) {
               onChange={(e) => setContent(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-sm text-white"
-              placeholder="장소에 대한 댓글을 남겨주세요..."
+              placeholder={I18N.commentPlaceholder[lang]}
             />
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-gray-700 text-xs text-gray-300 cursor-pointer hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F]">
                   <span>📷</span>
-                  <span>사진 추가 ({files.length}/5)</span>
+                  <span>{I18N.commentAddPhoto[lang]} ({files.length}/5)</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -3835,7 +3902,7 @@ function PlaceCommentsSection({ spot, user }) {
                 disabled={isSubmitting}
                 className="px-3 py-1.5 rounded-full bg-[#ADFF2F] text-black text-xs font-semibold hover:bg-[#ADFF2F]/90 disabled:opacity-50"
               >
-                {isSubmitting ? '등록 중...' : '등록'}
+                {isSubmitting ? I18N.commentSubmitting[lang] : I18N.commentSubmit[lang]}
               </button>
             </div>
             {files.length > 0 && (
@@ -3866,25 +3933,42 @@ function PlaceCommentsSection({ spot, user }) {
       {/* 댓글 리스트 */}
       <div className="space-y-3">
         {isLoading ? (
-          <p className="text-xs text-gray-400">댓글을 불러오는 중입니다...</p>
+          <p className="text-xs text-gray-400">{I18N.commentLoading[lang]}</p>
         ) : comments.length === 0 ? (
-          <p className="text-xs text-gray-500">첫 댓글을 남겨보세요.</p>
+          <p className="text-xs text-gray-500">{I18N.commentEmpty[lang]}</p>
         ) : (
-          comments.map((c, idx) => (
+          comments.map((c, idx) => {
+            const profile = profileMap[c.user_id]
+            const fallbackName = I18N.commentAnonymous[lang]
+            const displayName =
+              profile?.full_name
+              ?? (c.user_id === user?.id ? (user.user_metadata?.full_name || user.email?.split('@')[0]) : null)
+              ?? fallbackName
+            const avatarUrl = profile?.avatar_url ?? (c.user_id === user?.id ? user.user_metadata?.avatar_url : null)
+            return (
             <div key={c.id} className="border border-gray-800 rounded-lg bg-gray-900/60 px-3 py-2 text-xs text-gray-200">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-semibold text-[11px] text-gray-300">
-                  {/* 향후 프로필 연동 시 닉네임 표시 가능 */}
-                  익명
-                </span>
-                <span className="text-[10px] text-gray-500">
-                  {c.created_at ? formatCapturedTimeWithRecency(c.created_at) : ''}
+                <div className="flex items-center gap-2 min-w-0">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-[10px] text-gray-300 flex-shrink-0">
+                      {displayName.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                  )}
+                  <span className="font-semibold text-[11px] text-gray-300 truncate">
+                    {displayName}
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-500 flex-shrink-0 ml-2">
+                  {c.created_at ? formatTime(c.created_at) : ''}
                 </span>
               </div>
               <p className="whitespace-pre-line">{c.content}</p>
               {renderCommentImages(c, idx)}
             </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -4382,9 +4466,9 @@ function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
   ]
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-gray-800 z-20 pb-[env(safe-area-inset-bottom,0)]">
-      <div className="max-w-[430px] mx-auto">
-        <div className="grid grid-cols-3 gap-1 px-2 py-3">
+    <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-gray-800 z-20 pb-[env(safe-area-inset-bottom,0)] flex flex-col justify-center" style={{ minHeight: BOTTOM_NAV_CONTENT_HEIGHT }}>
+      <div className="max-w-[430px] mx-auto w-full">
+        <div className="grid grid-cols-3 gap-1 px-2 py-3 items-center" style={{ minHeight: BOTTOM_NAV_CONTENT_HEIGHT }}>
           {navItems.map((item) => (
             <button
               key={item.id}
