@@ -59,6 +59,7 @@ const I18N = {
 function LiveRadarNaverMap({
   center,
   mapItems,
+  sdkReady,
   mapFocusSpot,
   onFocusDone,
   userLocation,
@@ -78,7 +79,6 @@ function LiveRadarNaverMap({
   const infoWindowRef = useRef(null)
   const lastCenterRef = useRef(null)
   const lastZoomLevelRef = useRef(null) // 정수 줌만 보고 — zoom_changed가 연속 발생해도 마커 전체 재생성은 줌 레벨이 바뀔 때만
-  const sdkReady = useNaverMapSdk()
 
   const getClusterIconHtml = (count) =>
     `<div style="position:relative;width:48px;height:48px;"><div style="position:absolute;inset:0;border-radius:50%;background:#ADFF2F;opacity:0.75;"></div><div style="position:relative;width:48px;height:48px;border-radius:50%;background:#ADFF2F;border:2px solid #000;display:flex;align-items:center;justify-content:center;"><span style="color:#000;font-weight:bold;font-size:12px;">${count}+</span></div></div>`
@@ -355,7 +355,7 @@ function LiveRadarNaverMap({
       })
       markersRef.current.push(marker)
     })
-  }, [mapItems, onClusterClick, onSpotClick, onPostClick, getSpotPopupHtml, getPostPopupHtml])
+  }, [sdkReady, mapItems, onClusterClick, onSpotClick, onPostClick, getSpotPopupHtml, getPostPopupHtml])
 
   return <div ref={mapRef} className="w-full h-full" />
 }
@@ -414,6 +414,9 @@ function App() {
   if (location.pathname.startsWith('/admin')) {
     return null
   }
+
+  // 앱 시작 시 네이버 지도 SDK를 미리 로드해 첫 지도 진입 지연/레이스를 줄인다.
+  const isNaverMapSdkReady = useNaverMapSdk()
 
   const [currentView, setCurrentView] = useState('discover')
   const [selectedRegion, setSelectedRegion] = useState(null)
@@ -2970,6 +2973,7 @@ function App() {
           <LiveRadarNaverMap
             center={mapCenter}
             mapItems={mapItems}
+            sdkReady={isNaverMapSdkReady}
             mapFocusSpot={mapFocusSpot}
             onFocusDone={() => setMapFocusSpot(null)}
             userLocation={userLocation}
@@ -3013,7 +3017,7 @@ function App() {
             pickedPlaceIds={pickedPlaceIds}
             lang={lang}
           />
-          {mapItems.length === 0 && (
+          {!isLoadingPlaces && isNaverMapSdkReady && mapItems.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-10 pointer-events-none">
               <p>{I18N.mapNoLocation[lang]}</p>
             </div>
