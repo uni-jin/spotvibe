@@ -538,6 +538,16 @@ function App() {
     }
   }, [vibePosts, currentView])
 
+  // GA/GTM: 화면 전환 시 screen_view 이벤트 전송 (discover/map/my 등 구분용)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.dataLayer) return
+    window.dataLayer = window.dataLayer || []
+    window.dataLayer.push({
+      event: 'screen_view',
+      screen_name: currentView,
+    })
+  }, [currentView])
+
   // Supabase에서 포스트 데이터 로드
   useEffect(() => {
     const loadPosts = async () => {
