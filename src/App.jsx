@@ -2158,7 +2158,7 @@ function App() {
                       const visibleTags = spot.hashtags.filter((codeValue) => placeTagLabelMap[codeValue]).slice(0, 4)
                       if (visibleTags.length === 0) return null
                       return (
-                        <div className="flex flex-wrap gap-1 mt-1">
+                        <div className="flex flex-wrap gap-1 mt-4">
                           {visibleTags.map((codeValue) => {
                             const labelObj = placeTagLabelMap[codeValue]
                             const tagLabel =
@@ -4100,7 +4100,7 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
                   <img
                       src="/image/common/ico_camera.png"
                       alt="comment icon"
-                      className="w-3 h-3 object-contain"
+                      className="w-5 h-5 object-contain"
                   />
                   <span>{I18N.commentAddPhoto[lang]} ({files.length}/5)</span>
                   <input
