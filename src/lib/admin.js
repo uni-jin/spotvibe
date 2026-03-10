@@ -206,17 +206,18 @@ export const saveCommonCode = async (codeData, codeId = null) => {
       return { success: false, error: 'Invalid session' }
     }
 
-    // common_codes는 단일 code_label 컬럼만 사용하므로,
-    // 한국어 코드명을 기본 label로 저장하고, 없으면 기존 label/code_value를 사용
-    const unifiedLabel =
-      (codeData.code_label_ko && codeData.code_label_ko.trim()) ||
-      (codeData.code_label && codeData.code_label.trim && codeData.code_label.trim()) ||
-      codeData.code_value
+    const labelKo =
+      (codeData.code_label_ko != null && String(codeData.code_label_ko).trim()) ||
+      (codeData.code_label != null && String(codeData.code_label).trim()) ||
+      codeData.code_value || ''
+    const labelEn =
+      (codeData.code_label_en != null && String(codeData.code_label_en).trim()) || ''
 
     const { data, error } = await supabase.rpc('admin_save_common_code', {
       p_code_type: codeData.code_type,
       p_code_value: codeData.code_value,
-      p_code_label: unifiedLabel,
+      p_code_label_ko: labelKo,
+      p_code_label_en: labelEn,
       p_display_order: codeData.display_order ?? 0,
       p_is_active: codeData.is_active !== undefined ? codeData.is_active : true,
       p_id: codeId || null
