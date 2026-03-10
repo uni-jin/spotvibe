@@ -2036,7 +2036,7 @@ function App() {
       <div className="min-h-screen bg-black text-white pb-24">
         {/* Header - 높이 지도 헤더와 동일 (96px) */}
         <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
-          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
+          <div className="min-h-[96px] max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
                 {I18N.discoverTitle[lang]}
@@ -2334,16 +2334,20 @@ function App() {
               {spot.lat && spot.lng && (
                 <div className="pt-1">
                   <button
-                    type="button"
-                    onClick={() => {
-                      setMapFocusSpot(spot)
-                      setSelectedDiscoverSpot(spot)
-                      setDiscoverDetailFrom('home')
-                      setCurrentView('map')
-                    }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
+                      type="button"
+                      onClick={() => {
+                        setMapFocusSpot(spot)
+                        setSelectedDiscoverSpot(spot)
+                        setDiscoverDetailFrom('home')
+                        setCurrentView('map')
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
                   >
-                    <span className="text-sm">🗺️</span>
+                    <img
+                        src="/image/common/ico_map.png"
+                        alt="comment icon"
+                        className="w-5 h-5 object-contain" // 원하는 크기로 조절
+                    />
                     <span>Map</span>
                   </button>
                 </div>
@@ -3324,12 +3328,16 @@ function App() {
                               {lang === 'en' && spot.nameEn ? spot.nameEn : spot.name}
                             </p>
                           </div>
-                          <span className="text-gray-400 text-sm">💬</span>
+                          <img
+                              src="/image/common/ico_comment.png"
+                              alt="comment icon"
+                              className="w-3.5 h-3.5 object-contain"
+                          />
                         </div>
                       ))}
                   </div>
                 ) : (
-                  <p className="text-gray-400 text-center py-4 text-sm">
+                    <p className="text-gray-400 text-center py-4 text-sm">
                     {lang === 'ko' ? '장소 상세에서 댓글을 남긴 곳이 여기 모입니다.' : 'Places you commented on will appear here.'}
                   </p>
                 )}
@@ -4089,10 +4097,14 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-gray-700 text-xs text-gray-300 cursor-pointer hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F]">
-                  <span>📷</span>
+                  <img
+                      src="/image/common/ico_camera.png"
+                      alt="comment icon"
+                      className="w-3 h-3 object-contain"
+                  />
                   <span>{I18N.commentAddPhoto[lang]} ({files.length}/5)</span>
                   <input
-                    type="file"
+                      type="file"
                     accept="image/*"
                     multiple
                     className="hidden"
