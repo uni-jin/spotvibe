@@ -1,6 +1,19 @@
 -- admin_save_common_code: 단일 p_code_label 대신 p_code_label_ko, p_code_label_en 사용
+-- 동일 이름의 모든 오버로드를 제거한 뒤 새 함수만 생성
 
-DROP FUNCTION IF EXISTS admin_save_common_code(TEXT, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER);
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT pg_get_function_identity_arguments(p.oid) AS args
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'admin_save_common_code'
+  LOOP
+    EXECUTE format('DROP FUNCTION IF EXISTS public.admin_save_common_code(%s)', r.args);
+  END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION admin_save_common_code(
   p_code_type TEXT,
@@ -44,4 +57,4 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION admin_save_common_code IS 'Create or update common code (ko/en labels). SECURITY DEFINER for admin.';
+COMMENT ON FUNCTION admin_save_common_code(TEXT, TEXT, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER) IS 'Create or update common code (ko/en labels). SECURITY DEFINER for admin.';
