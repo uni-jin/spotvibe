@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
 const UsersManagement = () => {
@@ -16,36 +16,88 @@ const UsersManagement = () => {
     filterUsers()
   }, [users, searchQuery])
 
+  const formatDateTime = (ts) => {
+    if (!ts) return '-'
+    try {
+      return new Date(ts).toLocaleString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    } catch {
+      return '-'
+    }
+  }
+
+  const displayName = (profile) => {
+    const name = (profile?.full_name || '').trim()
+    if (name) return name
+    const email = (profile?.email || '').trim()
+    if (!email) return '이름 없음'
+    return email.split('@')[0] || '이름 없음'
+  }
+
   const loadUsers = async () => {
     try {
       setIsLoading(true)
-      // Get all profiles
+      // 1) profiles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false })
 
       if (profilesError) throw profilesError
+      const ids = (profiles || []).map((p) => p.id).filter(Boolean)
+      if (ids.length === 0) {
+        setUsers([])
+        return
+      }
 
-      // Get post counts for each user
-      const { data: posts, error: postsError } = await supabase
-        .from('posts')
-        .select('user_id')
+      // 2) picks + comments (batch) -> count + last activity time
+      const [picksRes, commentsRes] = await Promise.all([
+        supabase
+          .from('user_place_picks')
+          .select('user_id, created_at')
+          .in('user_id', ids),
+        supabase
+          .from('place_comments')
+          .select('user_id, created_at')
+          .in('user_id', ids),
+      ])
 
-      if (postsError) throw postsError
+      if (picksRes.error) throw picksRes.error
+      if (commentsRes.error) throw commentsRes.error
 
-      // Count posts per user
-      const postCounts = {}
-      posts.forEach(post => {
-        if (post.user_id) {
-          postCounts[post.user_id] = (postCounts[post.user_id] || 0) + 1
+      const pickCountByUser = {}
+      const lastPickAtByUser = {}
+      ;(picksRes.data || []).forEach((r) => {
+        if (!r.user_id) return
+        pickCountByUser[r.user_id] = (pickCountByUser[r.user_id] || 0) + 1
+        const t = r.created_at ? new Date(r.created_at).getTime() : 0
+        if (!lastPickAtByUser[r.user_id] || t > lastPickAtByUser[r.user_id]) {
+          lastPickAtByUser[r.user_id] = t
         }
       })
 
-      // Combine data
-      const usersWithStats = profiles.map(profile => ({
+      const commentCountByUser = {}
+      const lastCommentAtByUser = {}
+      ;(commentsRes.data || []).forEach((r) => {
+        if (!r.user_id) return
+        commentCountByUser[r.user_id] = (commentCountByUser[r.user_id] || 0) + 1
+        const t = r.created_at ? new Date(r.created_at).getTime() : 0
+        if (!lastCommentAtByUser[r.user_id] || t > lastCommentAtByUser[r.user_id]) {
+          lastCommentAtByUser[r.user_id] = t
+        }
+      })
+
+      const usersWithStats = (profiles || []).map((profile) => ({
         ...profile,
-        postCount: postCounts[profile.id] || 0
+        pickCount: pickCountByUser[profile.id] || 0,
+        commentCount: commentCountByUser[profile.id] || 0,
+        lastPickAt: lastPickAtByUser[profile.id] ? new Date(lastPickAtByUser[profile.id]).toISOString() : null,
+        lastCommentAt: lastCommentAtByUser[profile.id] ? new Date(lastCommentAtByUser[profile.id]).toISOString() : null,
       }))
 
       setUsers(usersWithStats)
@@ -64,7 +116,7 @@ const UsersManagement = () => {
 
     const query = searchQuery.toLowerCase()
     const filtered = users.filter(user =>
-      user.name?.toLowerCase().includes(query) ||
+      displayName(user).toLowerCase().includes(query) ||
       user.email?.toLowerCase().includes(query)
     )
     setFilteredUsers(filtered)
@@ -72,41 +124,67 @@ const UsersManagement = () => {
 
   const loadUserDetails = async (userId) => {
     try {
-      // Get user posts
-      const { data: posts, error } = await supabase
-        .from('posts')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-
-      // Get like counts
-      const postIds = posts.map(p => p.id)
-      const { data: likes, error: likesError } = await supabase
-        .from('post_likes')
-        .select('post_id')
-        .in('post_id', postIds)
-
-      if (likesError) throw likesError
-
-      const likeCounts = {}
-      likes.forEach(like => {
-        likeCounts[like.post_id] = (likeCounts[like.post_id] || 0) + 1
-      })
-
       const user = users.find(u => u.id === userId)
+      if (!user) return
+
+      // Totals + last activity
+      const [pickCountRes, commentCountRes, lastPickRes, lastCommentRes, recentPicksRes, recentCommentsRes] = await Promise.all([
+        supabase.from('user_place_picks').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('place_comments').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('user_place_picks').select('created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1),
+        supabase.from('place_comments').select('created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1),
+        supabase.from('user_place_picks').select('place_id, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
+        supabase.from('place_comments').select('id, place_id, content, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
+      ])
+
+      if (pickCountRes.error) throw pickCountRes.error
+      if (commentCountRes.error) throw commentCountRes.error
+      if (lastPickRes.error) throw lastPickRes.error
+      if (lastCommentRes.error) throw lastCommentRes.error
+      if (recentPicksRes.error) throw recentPicksRes.error
+      if (recentCommentsRes.error) throw recentCommentsRes.error
+
+      const recentPickPlaceIds = [...new Set((recentPicksRes.data || []).map((r) => r.place_id).filter(Boolean))]
+      const recentCommentPlaceIds = [...new Set((recentCommentsRes.data || []).map((r) => r.place_id).filter(Boolean))]
+      const placeIds = [...new Set([...recentPickPlaceIds, ...recentCommentPlaceIds])]
+
+      let placesById = {}
+      if (placeIds.length > 0) {
+        const { data: places, error: placesError } = await supabase
+          .from('places')
+          .select('id, name, name_en, thumbnail_url, type')
+          .in('id', placeIds)
+        if (placesError) throw placesError
+        placesById = (places || []).reduce((acc, p) => {
+          acc[p.id] = p
+          return acc
+        }, {})
+      }
+
       setSelectedUser({
         ...user,
-        posts: posts.map(post => ({
-          ...post,
-          likeCount: likeCounts[post.id] || 0
-        }))
+        pickCount: pickCountRes.count || 0,
+        commentCount: commentCountRes.count || 0,
+        lastPickAt: (lastPickRes.data && lastPickRes.data[0]?.created_at) || null,
+        lastCommentAt: (lastCommentRes.data && lastCommentRes.data[0]?.created_at) || null,
+        recentPicks: (recentPicksRes.data || []).map((r) => ({
+          ...r,
+          place: r.place_id ? placesById[r.place_id] : null,
+        })),
+        recentComments: (recentCommentsRes.data || []).map((r) => ({
+          ...r,
+          place: r.place_id ? placesById[r.place_id] : null,
+        })),
       })
     } catch (error) {
       console.error('Error loading user details:', error)
     }
   }
+
+  const selectedUserTitle = useMemo(() => {
+    if (!selectedUser) return ''
+    return displayName(selectedUser) || selectedUser.email
+  }, [selectedUser])
 
   if (isLoading) {
     return (
@@ -128,7 +206,7 @@ const UsersManagement = () => {
             >
               ← 목록으로
             </button>
-            <h2 className="text-2xl font-bold">{selectedUser.name || selectedUser.email}</h2>
+            <h2 className="text-2xl font-bold">{selectedUserTitle}</h2>
           </div>
         </div>
 
@@ -146,42 +224,72 @@ const UsersManagement = () => {
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-400">포스팅 수</p>
-              <p className="text-white">{selectedUser.postCount}개</p>
+              <p className="text-sm text-gray-400">픽 수</p>
+              <p className="text-white">{selectedUser.pickCount || 0}개</p>
             </div>
             <div>
-              <p className="text-sm text-gray-400">총 좋아요 수</p>
-              <p className="text-white">
-                {selectedUser.posts?.reduce((sum, p) => sum + p.likeCount, 0) || 0}개
-              </p>
+              <p className="text-sm text-gray-400">댓글 수</p>
+              <p className="text-white">{selectedUser.commentCount || 0}개</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">마지막 픽</p>
+              <p className="text-white">{formatDateTime(selectedUser.lastPickAt)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">마지막 댓글</p>
+              <p className="text-white">{formatDateTime(selectedUser.lastCommentAt)}</p>
             </div>
           </div>
         </div>
 
-        <div>
-          <h3 className="text-lg font-semibold mb-4">포스팅 목록</h3>
-          {selectedUser.posts && selectedUser.posts.length > 0 ? (
-            <div className="space-y-4">
-              {selectedUser.posts.map((post) => (
-                <div key={post.id} className="bg-gray-900 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold">{post.place_name}</p>
-                      <p className="text-sm text-gray-400">
-                        {new Date(post.created_at).toLocaleDateString('ko-KR')}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-400">좋아요</p>
-                      <p className="text-white">{post.likeCount}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-gray-900 rounded-lg p-6">
+            <h3 className="text-lg font-semibold mb-4">최근 픽한 장소 (10)</h3>
+            {selectedUser.recentPicks && selectedUser.recentPicks.length > 0 ? (
+              <div className="space-y-3">
+                {selectedUser.recentPicks.map((p, idx) => (
+                  <div key={`${p.place_id}-${idx}`} className="flex items-center gap-3 bg-gray-800/60 border border-gray-700 rounded-lg p-3">
+                    {p.place?.thumbnail_url ? (
+                      <img src={p.place.thumbnail_url} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-gray-700 flex items-center justify-center text-xs text-gray-400 flex-shrink-0">
+                        -
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-sm truncate">{p.place?.name || `place_id: ${p.place_id}`}</div>
+                      <div className="text-xs text-gray-400">{formatDateTime(p.created_at)}</div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-400">포스팅이 없습니다.</p>
-          )}
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-400 text-sm">픽한 장소가 없습니다.</p>
+            )}
+          </div>
+
+          <div className="bg-gray-900 rounded-lg p-6">
+            <h3 className="text-lg font-semibold mb-4">최근 댓글 (10)</h3>
+            {selectedUser.recentComments && selectedUser.recentComments.length > 0 ? (
+              <div className="space-y-3">
+                {selectedUser.recentComments.map((c) => (
+                  <div key={c.id} className="bg-gray-800/60 border border-gray-700 rounded-lg p-3">
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <div className="font-semibold text-sm truncate">
+                        {c.place?.name || `place_id: ${c.place_id}`}
+                      </div>
+                      <div className="text-xs text-gray-400 flex-shrink-0">{formatDateTime(c.created_at)}</div>
+                    </div>
+                    <div className="text-sm text-gray-200 whitespace-pre-line break-words">
+                      {c.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-400 text-sm">댓글이 없습니다.</p>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -221,9 +329,12 @@ const UsersManagement = () => {
         <table className="w-full">
           <thead className="bg-gray-800">
             <tr>
-              <th className="px-6 py-3 text-left text-sm font-semibold">이름/이메일</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold">사용자</th>
               <th className="px-6 py-3 text-left text-sm font-semibold">가입일</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold">포스팅 수</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold">픽</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold">댓글</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold">마지막 픽</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold">마지막 댓글</th>
               <th className="px-6 py-3 text-left text-sm font-semibold">작업</th>
             </tr>
           </thead>
@@ -232,15 +343,27 @@ const UsersManagement = () => {
               filteredUsers.map((user) => (
               <tr key={user.id} className="hover:bg-gray-800/50">
                 <td className="px-6 py-4">
-                  <div>
-                    <p className="font-medium">{user.name || '이름 없음'}</p>
-                    <p className="text-sm text-gray-400">{user.email}</p>
+                  <div className="flex items-center gap-3">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover border border-gray-700 flex-shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-xs text-gray-400 flex-shrink-0">
+                        {(displayName(user).charAt(0) || '?').toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{displayName(user)}</p>
+                      <p className="text-sm text-gray-400 truncate">{user.email}</p>
+                    </div>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-300">
                   {new Date(user.created_at).toLocaleDateString('ko-KR')}
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-300">{user.postCount}개</td>
+                <td className="px-6 py-4 text-sm text-gray-300">{user.pickCount || 0}개</td>
+                <td className="px-6 py-4 text-sm text-gray-300">{user.commentCount || 0}개</td>
+                <td className="px-6 py-4 text-sm text-gray-300">{formatDateTime(user.lastPickAt)}</td>
+                <td className="px-6 py-4 text-sm text-gray-300">{formatDateTime(user.lastCommentAt)}</td>
                 <td className="px-6 py-4">
                   <button
                     onClick={() => loadUserDetails(user.id)}
@@ -253,7 +376,7 @@ const UsersManagement = () => {
             ))
             ) : (
               <tr>
-                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
                   {users.length === 0 ? '등록된 회원이 없습니다.' : '검색 결과가 없습니다.'}
                 </td>
               </tr>

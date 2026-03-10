@@ -49,7 +49,6 @@ const AdminLayout = ({ children, currentMenu, onMenuChange, onLogout }) => {
   const menuItems = [
     { id: 'users', label: '회원관리', icon: '👥' },
     { id: 'places', label: '장소관리', icon: '📍' },
-    { id: 'custom-places', label: '기타 장소 관리', icon: '📝' },
     { id: 'settings', label: '설정', icon: '⚙️' },
   ]
 
