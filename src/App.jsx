@@ -3921,7 +3921,7 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
                   <img
                       src="/image/common/ico_camera.png"
                       alt="comment icon"
-                      className="w-3 h-3 object-contain"
+                      className="w-5 h-5 object-contain"
                   />
                   <span>{I18N.commentAddPhoto[lang]} ({files.length}/5)</span>
                   <input
