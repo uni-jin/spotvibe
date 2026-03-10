@@ -462,6 +462,14 @@ function App() {
   const [placeIdsCommentedByUser, setPlaceIdsCommentedByUser] = useState([]) // 댓글 단 장소 ID 목록 (마이페이지용)
   const [showPickedOnlyOnMap, setShowPickedOnlyOnMap] = useState(false) // 지도에서 픽한 장소만 보기
 
+  // My profile edit
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false)
+  const [editProfileName, setEditProfileName] = useState('')
+  const [editAvatarFile, setEditAvatarFile] = useState(null) // File | null
+  const [editAvatarPreview, setEditAvatarPreview] = useState(null) // string | null
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [profileSaveError, setProfileSaveError] = useState('')
+
   const regions = [
     { id: 'Seongsu', name: 'Seongsu', active: true },
     { id: 'Hongdae', name: 'Hongdae', active: false },
@@ -521,19 +529,19 @@ function App() {
             setSelectedPost(post)
             setCurrentView('post-detail')
           } else {
-            // 포스트를 찾을 수 없으면 Feed로 이동
+            // 포스트를 찾을 수 없으면 Discover로 이동
             setSelectedPost(null)
-            setCurrentView('feed')
+            setCurrentView('discover')
           }
-        } else if (view === 'feed' || view === 'discover' || view === 'map' || view === 'my') {
+        } else if (view === 'discover' || view === 'map' || view === 'my') {
           // 다른 뷰로 복원
           setSelectedPost(null)
           setCurrentView(view)
         }
       } else {
-        // 히스토리 상태가 없으면 Feed로 이동
+        // 히스토리 상태가 없으면 Discover로 이동
         setSelectedPost(null)
-        setCurrentView('feed')
+        setCurrentView('discover')
       }
     }
 
@@ -1059,7 +1067,7 @@ function App() {
     const place = hotSpots.find((p) => p.id === placeId)
     if (place) {
       setSpotFilter(placeId)
-      setCurrentView('feed')
+      setCurrentView('discover')
     }
   }
 
@@ -1135,8 +1143,8 @@ function App() {
   }
   
   const handleClosePostDetail = () => {
-    const previousView = viewBeforePostDetail || viewBeforePostDetailRef.current || 'feed'
-    window.history.pushState({ view: previousView }, '', previousView === 'feed' ? '#feed' : '#')
+    const previousView = viewBeforePostDetail || viewBeforePostDetailRef.current || 'discover'
+    window.history.pushState({ view: previousView }, '', '#')
     setSelectedPost(null)
     setViewBeforePostDetail(null)
     viewBeforePostDetailRef.current = null
@@ -1154,16 +1162,16 @@ function App() {
             setSelectedPost(post)
             setCurrentView('post-detail')
           }
-        } else if (view === 'feed' || view === 'map' || view === 'quest' || view === 'my') {
+        } else if (view === 'map' || view === 'quest' || view === 'my' || view === 'discover') {
           setSelectedPost(null)
           setCurrentView(view)
         } else {
           setSelectedPost(null)
-          setCurrentView(viewBeforePostDetailRef.current || 'feed')
+          setCurrentView(viewBeforePostDetailRef.current || 'discover')
         }
       } else {
         setSelectedPost(null)
-        setCurrentView(viewBeforePostDetailRef.current || 'feed')
+        setCurrentView(viewBeforePostDetailRef.current || 'discover')
       }
     }
 
@@ -1870,6 +1878,80 @@ function App() {
     setCurrentView(viewId)
   }
 
+  const openEditProfile = () => {
+    if (!user) return
+    setProfileSaveError('')
+    setEditProfileName(user.name || '')
+    setEditAvatarFile(null)
+    setEditAvatarPreview(user.avatar || null)
+    setShowEditProfileModal(true)
+  }
+
+  const closeEditProfile = () => {
+    setShowEditProfileModal(false)
+    setEditAvatarFile(null)
+    setEditAvatarPreview(null)
+    setProfileSaveError('')
+  }
+
+  const handleEditAvatarChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setEditAvatarFile(file)
+    setEditAvatarPreview(URL.createObjectURL(file))
+  }
+
+  const saveProfileChanges = async () => {
+    if (!user?.id) return
+    const nextName = (editProfileName || '').trim()
+    if (!nextName) {
+      setProfileSaveError(lang === 'ko' ? '이름을 입력해주세요.' : 'Please enter a name.')
+      return
+    }
+
+    setIsSavingProfile(true)
+    setProfileSaveError('')
+    try {
+      let avatarUrl = user.avatar || null
+      if (editAvatarFile) {
+        const ext = editAvatarFile.name.split('.').pop() || 'jpg'
+        const path = `avatars/${user.id}/${Date.now()}.${ext}`
+        const { data: uploadData } = await db.uploadImage(editAvatarFile, path)
+        avatarUrl = uploadData.publicUrl
+      }
+
+      // 1) profiles 테이블 업데이트 (public profile)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: nextName,
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+
+      if (profileError) throw profileError
+
+      // 2) auth user_metadata 업데이트 (현재 앱의 user state source)
+      const { error: authError } = await supabase.auth.updateUser({
+        data: { full_name: nextName, avatar_url: avatarUrl },
+      })
+      if (authError) {
+        // profiles는 업데이트 되었으니 UI는 반영하되, 다음 로그인/리프레시 때 동기화될 수 있도록 로그만 남김
+        console.warn('Failed to update auth user metadata:', authError)
+      }
+
+      // 3) UI 즉시 반영
+      setUser((prev) => (prev ? { ...prev, name: nextName, avatar: avatarUrl } : prev))
+      closeEditProfile()
+    } catch (err) {
+      console.error('Failed to save profile:', err)
+      setProfileSaveError(err?.message || (lang === 'ko' ? '프로필 저장에 실패했습니다.' : 'Failed to save profile.'))
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
+
   // Home View는 현재 사용하지 않음 (초기 진입 시 Discover로 바로 진입)
 
   // Discover View - 관리자 등록 팝업 전용
@@ -1954,7 +2036,7 @@ function App() {
       <div className="min-h-screen bg-black text-white pb-24">
         {/* Header - 높이 지도 헤더와 동일 (96px) */}
         <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
-          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
+          <div className="min-h-[96px] max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
                 {I18N.discoverTitle[lang]}
@@ -2076,7 +2158,7 @@ function App() {
                       const visibleTags = spot.hashtags.filter((codeValue) => placeTagLabelMap[codeValue]).slice(0, 4)
                       if (visibleTags.length === 0) return null
                       return (
-                        <div className="flex flex-wrap gap-1 mt-1">
+                        <div className="flex flex-wrap gap-1 mt-4">
                           {visibleTags.map((codeValue) => {
                             const labelObj = placeTagLabelMap[codeValue]
                             const tagLabel =
@@ -2252,16 +2334,20 @@ function App() {
               {spot.lat && spot.lng && (
                 <div className="pt-1">
                   <button
-                    type="button"
-                    onClick={() => {
-                      setMapFocusSpot(spot)
-                      setSelectedDiscoverSpot(spot)
-                      setDiscoverDetailFrom('home')
-                      setCurrentView('map')
-                    }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
+                      type="button"
+                      onClick={() => {
+                        setMapFocusSpot(spot)
+                        setSelectedDiscoverSpot(spot)
+                        setDiscoverDetailFrom('home')
+                        setCurrentView('map')
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-black/80 border border-[#ADFF2F]/60 text-xs text-[#ADFF2F] hover:bg-[#ADFF2F]/10 transition-colors"
                   >
-                    <span className="text-sm">🗺️</span>
+                    <img
+                        src="/image/common/ico_map.png"
+                        alt="comment icon"
+                        className="w-5 h-5 object-contain" // 원하는 크기로 조절
+                    />
                     <span>Map</span>
                   </button>
                 </div>
@@ -3138,12 +3224,21 @@ function App() {
                       {user.name?.charAt(0).toUpperCase() || '👤'}
                     </div>
                   )}
-                  <div className="flex-1">
-                    <h2 className="text-xl font-bold">{user.name}</h2>
-                    <p className="text-sm text-gray-400">{user.email}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-bold truncate">{user.name}</h2>
+                      <button
+                        type="button"
+                        onClick={openEditProfile}
+                        className="p-1 rounded-full hover:bg-gray-800 text-gray-400 hover:text-white flex-shrink-0"
+                        aria-label={lang === 'ko' ? '이름 변경' : 'Edit name'}
+                      >
+                        ✎
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-400 truncate">{user.email}</p>
                   </div>
                 </div>
-                
                 <button
                   onClick={handleLogout}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-white font-semibold py-3 rounded-lg border border-gray-700 transition-colors"
@@ -3233,12 +3328,16 @@ function App() {
                               {lang === 'en' && spot.nameEn ? spot.nameEn : spot.name}
                             </p>
                           </div>
-                          <span className="text-gray-400 text-sm">💬</span>
+                          <img
+                              src="/image/common/ico_comment.png"
+                              alt="comment icon"
+                              className="w-3.5 h-3.5 object-contain"
+                          />
                         </div>
                       ))}
                   </div>
                 ) : (
-                  <p className="text-gray-400 text-center py-4 text-sm">
+                    <p className="text-gray-400 text-center py-4 text-sm">
                     {lang === 'ko' ? '장소 상세에서 댓글을 남긴 곳이 여기 모입니다.' : 'Places you commented on will appear here.'}
                   </p>
                 )}
@@ -3263,6 +3362,94 @@ function App() {
             </div>
           )}
         </div>
+
+        {showEditProfileModal && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999]"
+              onClick={closeEditProfile}
+            />
+            <div className="fixed left-4 right-4 top-1/2 -translate-y-1/2 md:left-1/2 md:right-auto md:-translate-x-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-[10000] p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">
+                  {lang === 'ko' ? '프로필 수정' : 'Edit Profile'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeEditProfile}
+                  className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+                  aria-label="close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-300">
+                    {lang === 'ko' ? '프로필 사진' : 'Profile photo'}
+                  </label>
+                  <div className="flex items-center gap-4">
+                    {editAvatarPreview ? (
+                      <img src={editAvatarPreview} alt="" className="w-14 h-14 rounded-full object-cover border border-gray-700" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-400">
+                        {user?.name?.charAt(0).toUpperCase() || '👤'}
+                      </div>
+                    )}
+                    <label className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg border border-gray-700 text-sm cursor-pointer">
+                      {lang === 'ko' ? '사진 선택' : 'Choose photo'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleEditAvatarChange}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-300">
+                    {lang === 'ko' ? '이름' : 'Name'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editProfileName}
+                    onChange={(e) => setEditProfileName(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                    placeholder={lang === 'ko' ? '이름을 입력하세요' : 'Enter your name'}
+                  />
+                </div>
+
+                {profileSaveError && (
+                  <div className="p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-sm">
+                    {profileSaveError}
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeEditProfile}
+                    disabled={isSavingProfile}
+                    className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg border border-gray-700 text-white disabled:opacity-50"
+                  >
+                    {lang === 'ko' ? '취소' : 'Cancel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveProfileChanges}
+                    disabled={isSavingProfile}
+                    className="flex-1 px-4 py-2 bg-[#ADFF2F] hover:bg-[#ADFF2F]/90 rounded-lg text-black font-semibold disabled:opacity-50"
+                  >
+                    {isSavingProfile ? (lang === 'ko' ? '저장 중...' : 'Saving...') : (lang === 'ko' ? '저장' : 'Save')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         <BottomNav currentView={currentView} onNavClick={handleNavClick} lang={lang} />
       </div>
@@ -3910,10 +4097,14 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-gray-700 text-xs text-gray-300 cursor-pointer hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F]">
-                  <span>📷</span>
+                  <img
+                      src="/image/common/ico_camera.png"
+                      alt="comment icon"
+                      className="w-5 h-5 object-contain"
+                  />
                   <span>{I18N.commentAddPhoto[lang]} ({files.length}/5)</span>
                   <input
-                    type="file"
+                      type="file"
                     accept="image/*"
                     multiple
                     className="hidden"
