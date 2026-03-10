@@ -50,6 +50,14 @@ function AdminNaverMap({ lat, lng, onChangeLatLng }) {
   )
 }
 
+function formatCommonCodeLabel(code) {
+  if (!code) return ''
+  const ko = (code.code_label_ko ?? code.code_label ?? '').trim()
+  const en = (code.code_label_en ?? '').trim()
+  if (ko && en && ko !== en) return `${ko} (${en})`
+  return ko || en || ''
+}
+
 const PlacesManagement = ({ resetTrigger = 0 }) => {
   const [places, setPlaces] = useState([])
   const [filteredPlaces, setFilteredPlaces] = useState([])
@@ -276,12 +284,14 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">장소관리</h2>
-        <button
-          onClick={handleAddNew}
-          className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors font-semibold"
-        >
-          + 장소 등록
-        </button>
+        {!showForm && (
+          <button
+            onClick={handleAddNew}
+            className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors font-semibold"
+          >
+            + 장소 등록
+          </button>
+        )}
       </div>
 
       {showForm ? (
@@ -325,7 +335,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   <option value="">전체</option>
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.code_value}>
-                      {cat.code_label}
+                      {formatCommonCodeLabel(cat)}
                     </option>
                   ))}
                 </select>
@@ -416,7 +426,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                             <p className="font-medium">{place.name}</p>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-300">
-                            {category?.code_label || place.type || '-'}
+                            {formatCommonCodeLabel(category) || place.type || '-'}
                           </td>
                           <td className="px-6 py-4 align-top">
                             {place.recentVibe ? (
@@ -807,7 +817,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             <option value="">카테고리 선택</option>
             {categories.map((cat) => (
               <option key={cat.id} value={cat.code_value}>
-                {cat.code_label}
+                {formatCommonCodeLabel(cat)}
               </option>
             ))}
           </select>
@@ -1028,7 +1038,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                               )
                             }}
                           />
-                          <span>{tag.code_label}</span>
+                          <span>{formatCommonCodeLabel(tag)}</span>
                         </label>
                       ))}
                     </div>
@@ -1055,7 +1065,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                               )
                             }}
                           />
-                          <span>{tag.code_label}</span>
+                          <span>{formatCommonCodeLabel(tag)}</span>
                         </label>
                       ))}
                     </div>
@@ -1082,7 +1092,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                               )
                             }}
                           />
-                          <span>{tag.code_label}</span>
+                          <span>{formatCommonCodeLabel(tag)}</span>
                         </label>
                       ))}
                     </div>
@@ -1109,7 +1119,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                               )
                             }}
                           />
-                          <span>{tag.code_label}</span>
+                          <span>{formatCommonCodeLabel(tag)}</span>
                         </label>
                       ))}
                     </div>
