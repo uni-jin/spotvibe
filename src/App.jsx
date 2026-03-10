@@ -4073,6 +4073,21 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
     )
   }
 
+  const handleDeleteComment = async (commentId) => {
+    if (!user?.id || !commentId) return
+    const confirmed = window.confirm(lang === 'ko' ? '댓글을 삭제할까요?' : 'Delete this comment?')
+    if (!confirmed) return
+
+    try {
+      setError('')
+      await db.deletePlaceComment(commentId, user.id)
+      setComments((prev) => prev.filter((c) => c.id !== commentId))
+    } catch (err) {
+      console.error('Failed to delete comment:', err)
+      setError(err.message || I18N.commentErrorGeneric[lang])
+    }
+  }
+
   return (
     <div className="max-w-[430px] mx-auto px-4 pb-6 pt-4">
       <h2 className="text-sm font-semibold text-gray-200 mb-2">
@@ -4155,33 +4170,45 @@ function PlaceCommentsSection({ spot, user, formatCapturedTimeWithRecency, lang 
           comments.map((c, idx) => {
             const profile = profileMap[c.user_id]
             const fallbackName = I18N.commentAnonymous[lang]
+            const isOwnComment = c.user_id === user?.id
             const displayName =
               profile?.full_name
-              ?? (c.user_id === user?.id ? (user.user_metadata?.full_name || user.email?.split('@')[0]) : null)
+              ?? (isOwnComment ? (user.user_metadata?.full_name || user.email?.split('@')[0]) : null)
               ?? fallbackName
-            const avatarUrl = profile?.avatar_url ?? (c.user_id === user?.id ? user.user_metadata?.avatar_url : null)
+            const avatarUrl = profile?.avatar_url ?? (isOwnComment ? user.user_metadata?.avatar_url : null)
             return (
-            <div key={c.id} className="border border-gray-800 rounded-lg bg-gray-900/60 px-3 py-2 text-xs text-gray-200">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 min-w-0">
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-[10px] text-gray-300 flex-shrink-0">
-                      {displayName.charAt(0)?.toUpperCase() || '?'}
-                    </div>
-                  )}
-                  <span className="font-semibold text-[11px] text-gray-300 truncate">
-                    {displayName}
-                  </span>
+              <div key={c.id} className="border border-gray-800 rounded-lg bg-gray-900/60 px-3 py-2 text-xs text-gray-200">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-[10px] text-gray-300 flex-shrink-0">
+                        {displayName.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                    <span className="font-semibold text-[11px] text-gray-300 truncate">
+                      {displayName}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                    <span className="text-[10px] text-gray-500">
+                      {c.created_at ? formatTime(c.created_at) : ''}
+                    </span>
+                    {isOwnComment && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteComment(c.id)}
+                        className="text-[10px] text-gray-500 hover:text-red-400"
+                      >
+                        {lang === 'ko' ? '삭제' : 'Delete'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <span className="text-[10px] text-gray-500 flex-shrink-0 ml-2">
-                  {c.created_at ? formatTime(c.created_at) : ''}
-                </span>
+                <p className="whitespace-pre-line">{c.content}</p>
+                {renderCommentImages(c, idx)}
               </div>
-              <p className="whitespace-pre-line">{c.content}</p>
-              {renderCommentImages(c, idx)}
-            </div>
             )
           })
         )}

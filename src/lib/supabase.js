@@ -388,6 +388,25 @@ export const db = {
     return data
   },
 
+  async deletePlaceComment(commentId, userId) {
+    if (!commentId || !userId) {
+      throw new Error('commentId and userId are required')
+    }
+
+    const { error } = await supabase
+      .from('place_comments')
+      .delete()
+      .eq('id', commentId)
+      .eq('user_id', userId)
+
+    if (error) {
+      console.error('Error deleting place comment:', error)
+      throw error
+    }
+
+    return true
+  },
+
   // --- User place picks (Pick한 장소) ---
   async getPickedPlaceIds(userId) {
     if (!userId) return []
