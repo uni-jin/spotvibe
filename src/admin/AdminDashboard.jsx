@@ -4,7 +4,6 @@ import AdminLayout from './AdminLayout'
 import { verifyAdminToken } from '../lib/admin'
 import UsersManagement from './components/UsersManagement'
 import PlacesManagement from './components/PlacesManagement'
-import CustomPlacesManagement from './components/CustomPlacesManagement'
 import SettingsManagement from './components/SettingsManagement'
 
 const AdminDashboard = () => {
@@ -63,8 +62,6 @@ const AdminDashboard = () => {
         return <UsersManagement resetTrigger={menuResetTrigger} />
       case 'places':
         return <PlacesManagement resetTrigger={menuResetTrigger} />
-      case 'custom-places':
-        return <CustomPlacesManagement resetTrigger={menuResetTrigger} />
       case 'settings':
         return <SettingsManagement resetTrigger={menuResetTrigger} />
       default:
