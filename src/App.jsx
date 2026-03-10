@@ -469,6 +469,14 @@ function App() {
     { id: 'Gangnam', name: 'Gangnam', active: false },
   ]
 
+  // 공통코드 카테고리 라벨: DB의 code_label_ko / code_label_en 기준 다국어 (구 code_label 호환)
+  const getCategoryLabel = (cat, l) => {
+    if (!cat) return ''
+    const ko = (cat.code_label_ko ?? cat.code_label ?? '').trim()
+    const en = (cat.code_label_en ?? '').trim()
+    return l === 'en' ? (en || ko) : (ko || en || '')
+  }
+
   // 지역 선택 상태 복원 (새로고침 시 유지)
   // - 이전에는 여기서 currentView를 'feed'로 강제로 변경했지만,
   //   이는 초기 진입 시 Home 화면이 보이지 않거나 뷰 전환이 꼬이는 원인이 되었음.
@@ -2407,7 +2415,7 @@ function App() {
                         : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
                     }`}
                   >
-                    {category.code_label}
+                    {getCategoryLabel(category, lang)}
                     {categorySpots.length > 0 && (
                       <span className={`ml-2 text-xs ${isSelected ? 'text-black/70' : 'text-gray-500'}`}>
                         ({categorySpots.length})
@@ -2492,7 +2500,7 @@ function App() {
               return (
                 <div className="text-center py-8">
                   <p className="text-gray-400 text-sm">
-                    No {selectedCategory?.code_label || 'places'} available
+                    No {getCategoryLabel(selectedCategory, lang) || 'places'} available
                   </p>
                 </div>
               )
@@ -2699,6 +2707,8 @@ function App() {
             additionalImages={postAdditionalImages}
             metadata={postMetadata}
             userLocation={userLocation}
+            lang={lang}
+            getCategoryLabel={getCategoryLabel}
             onCategoryChange={setPostCategory}
             onPlaceChange={setPostPlace}
             onCustomPlaceChange={setPostCustomPlace}
@@ -2959,7 +2969,7 @@ function App() {
                           : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800 hover:text-white'
                       }`}
                     >
-                      {category.code_label}
+                      {getCategoryLabel(category, lang)}
                     </button>
                   )
                 })}
@@ -4006,6 +4016,8 @@ function PostVibeModal({
   additionalImages,
   metadata,
   userLocation,
+  lang = 'ko',
+  getCategoryLabel = (cat) => (cat?.code_label_ko ?? cat?.code_label ?? ''),
   onCategoryChange,
   onPlaceChange,
   onCustomPlaceChange,
@@ -4110,7 +4122,7 @@ function PostVibeModal({
                   }`}
                 >
                   <div className="text-xs font-semibold">
-                    {category.code_label}
+                    {getCategoryLabel(category, lang)}
                   </div>
                 </button>
               ))}
