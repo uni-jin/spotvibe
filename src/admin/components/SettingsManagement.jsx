@@ -15,6 +15,14 @@ const TAG_GROUP_CONFIG = [
 
 const PLACE_TAG_TYPES = ['place_tag_admission', 'place_tag_benefit', 'place_tag_amenity', 'place_tag_content']
 
+const formatCommonCodeLabel = (code) => {
+  if (!code) return ''
+  const ko = (code.code_label_ko ?? code.code_label ?? '').trim()
+  const en = (code.code_label_en ?? '').trim()
+  if (ko && en && ko !== en) return `${ko} (${en})`
+  return ko || en || ''
+}
+
 const SettingsManagement = () => {
   const [activeTab, setActiveTab] = useState('codes')
   const [codes, setCodes] = useState([])
@@ -248,7 +256,7 @@ const TagGroupsManagement = ({ tagCodesByGroup, onReload }) => {
   }
 
   const handleDeleteClick = (code) => {
-    const firstMsg = `"${code.code_label}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
+    const firstMsg = `"${formatCommonCodeLabel(code)}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
     if (window.confirm(firstMsg)) {
       if (window.confirm('정말 삭제하시겠습니까?')) {
         doDelete(code)
@@ -316,7 +324,7 @@ const TagGroupsManagement = ({ tagCodesByGroup, onReload }) => {
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">{item.code_label}</p>
+                        <p className="font-medium truncate">{formatCommonCodeLabel(item)}</p>
                         <p className="text-xs text-gray-500 truncate">{item.code_value}</p>
                         {!item.is_active && (
                           <span className="text-[10px] text-gray-400">비활성</span>
@@ -377,8 +385,8 @@ const CommonCodesManagement = ({ codes, codeType, onReload }) => {
 
   const handleDeleteClick = (code) => {
     const firstMsg = isPlaceTag
-      ? `"${code.code_label}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
-      : `"${code.code_label}" 카테고리를 삭제하시겠습니까?`
+      ? `"${formatCommonCodeLabel(code)}" 태그를 삭제하시겠습니까?\n\n이 태그를 사용 중인 장소가 있을 수 있습니다. 삭제하면 해당 태그가 공통코드에서 제거되며, 사용자 화면에도 더 이상 표시되지 않습니다.`
+      : `"${formatCommonCodeLabel(code)}" 카테고리를 삭제하시겠습니까?`
     if (window.confirm(firstMsg)) {
       if (isPlaceTag) {
         const secondMsg = '정말 삭제하시겠습니까?'
@@ -457,7 +465,7 @@ const CommonCodesManagement = ({ codes, codeType, onReload }) => {
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="font-medium">{category.code_label}</p>
+                    <p className="font-medium">{formatCommonCodeLabel(category)}</p>
                     {!category.is_active && (
                       <span className="px-2 py-0.5 bg-gray-700 text-gray-400 text-xs rounded">
                         비활성
