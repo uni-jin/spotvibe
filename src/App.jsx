@@ -4486,9 +4486,9 @@ function PostVibeModal({
 // Bottom Navigation Component
 function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
   const navItems = [
-    { id: 'discover', labelKey: 'navDiscover', icon: '⭐' },
-    { id: 'map', labelKey: 'navMap', icon: '🗺️' },
-    { id: 'my', labelKey: 'navMy', icon: '👤' },
+    { id: 'discover', labelKey: 'navDiscover', icon: '/image/common/ico_discover.png' },
+    { id: 'map', labelKey: 'navMap', icon: '/image/common/ico_map.png' },
+    { id: 'my', labelKey: 'navMy', icon: '/image/common/ico_setting.png' },
   ]
 
   return (
@@ -4496,20 +4496,24 @@ function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
       <div className="max-w-[430px] mx-auto w-full">
         <div className="grid grid-cols-3 gap-1 px-2 py-3 items-center" style={{ minHeight: BOTTOM_NAV_CONTENT_HEIGHT }}>
           {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onNavClick(item.id)}
-              className={`
+              <button
+                  key={item.id}
+                  onClick={() => onNavClick(item.id)}
+                  className={`
                 flex flex-col items-center gap-1 p-2 rounded-lg transition-all
                 ${currentView === item.id
-                  ? 'text-[#ADFF2F]'
-                  : 'text-gray-500 hover:text-gray-300'
-                }
+                      ? 'text-[#ADFF2F]'
+                      : 'text-gray-500 hover:text-gray-300'
+                  }
               `}
-            >
-              <span className="text-xl">{item.icon}</span>
-              <span className="text-xs font-medium">{I18N[item.labelKey][lang]}</span>
-            </button>
+              >
+                <img
+                    src={item.icon}
+                    alt={item.id}
+                    className={`w-7 h-7 object-contain ${currentView === item.id ? '' : 'opacity-50'}`}
+                />
+                <span className="text-xs font-medium">{I18N[item.labelKey][lang]}</span>
+              </button>
           ))}
         </div>
       </div>
@@ -4518,11 +4522,11 @@ function BottomNav({ currentView, onNavClick, lang = 'ko' }) {
 }
 
 // Delete Confirm Modal Component
-function DeleteConfirmModal({ onClose, onConfirm }) {
+function DeleteConfirmModal({onClose, onConfirm}) {
   return (
-    <>
-      <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[9999]"
+      <>
+        <div
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[9999]"
         onClick={onClose}
       />
       
