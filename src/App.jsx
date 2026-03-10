@@ -2076,7 +2076,7 @@ function App() {
                       const visibleTags = spot.hashtags.filter((codeValue) => placeTagLabelMap[codeValue]).slice(0, 4)
                       if (visibleTags.length === 0) return null
                       return (
-                        <div className="flex flex-wrap gap-1 mt-3">
+                        <div className="flex flex-wrap gap-1 mt-4">
                           {visibleTags.map((codeValue) => {
                             const labelObj = placeTagLabelMap[codeValue]
                             const tagLabel =
