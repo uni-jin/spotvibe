@@ -406,8 +406,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">장소명</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">카테고리</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">최근 상태</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">포스팅 수</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">댓글 수</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-28">활성화</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-48">노출기간</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">등록일</th>
@@ -418,7 +417,6 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   {filteredPlaces.length > 0 ? (
                     filteredPlaces.map((place) => {
                       const category = categories.find(c => c.code_value === place.type)
-                      const recentParts = formatDateParts(place.recentPostTime)
                       const createdParts = formatDateParts(place.created_at)
                       return (
                         <tr key={place.id} className="hover:bg-gray-800/50">
@@ -428,23 +426,8 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {formatCommonCodeLabel(category) || place.type || '-'}
                           </td>
-                          <td className="px-6 py-4 align-top">
-                            {place.recentVibe ? (
-                              <span className="text-sm text-[#ADFF2F]">
-                                {getVibeLabel(place.recentVibe)}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-gray-500">-</span>
-                            )}
-                            {recentParts && (
-                              <div className="text-xs text-gray-500 mt-1 leading-tight">
-                                <div>{recentParts.date}</div>
-                                <div>{recentParts.time}</div>
-                              </div>
-                            )}
-                          </td>
                           <td className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap">
-                            {place.postCount || 0}개
+                            {(place.commentCount || 0)}개
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span
@@ -481,7 +464,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="8" className="px-6 py-8 text-center text-gray-400">
+                      <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
                         {places.length === 0 ? '등록된 장소가 없습니다.' : '검색 결과가 없습니다.'}
                       </td>
                     </tr>
