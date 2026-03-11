@@ -406,7 +406,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">장소명</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">카테고리</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">댓글 수</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-32">픽 / 댓글</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-28">활성화</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-48">노출기간</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">등록일</th>
@@ -418,6 +418,8 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                     filteredPlaces.map((place) => {
                       const category = categories.find(c => c.code_value === place.type)
                       const createdParts = formatDateParts(place.created_at)
+                      const pickCount = place.pickCount || 0
+                      const commentCount = place.commentCount || 0
                       return (
                         <tr key={place.id} className="hover:bg-gray-800/50">
                           <td className="px-6 py-4">
@@ -427,7 +429,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                             {formatCommonCodeLabel(category) || place.type || '-'}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap">
-                            {(place.commentCount || 0)}개
+                            {pickCount} / {commentCount}개
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span
