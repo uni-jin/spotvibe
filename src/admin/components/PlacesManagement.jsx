@@ -737,8 +737,13 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
       if (thumbnailFile) {
         const compressedFile = await compressImage(thumbnailFile)
         const timestamp = Date.now()
-        const fileExtension = compressedFile.name.split('.').pop() || 'jpg'
-        const thumbnailPath = `places/${timestamp}_${formData.name.replace(/\s+/g, '_')}.${fileExtension}`
+        const fileExtension = compressedFile?.name?.split('.').pop() || 'jpg'
+        const baseName = (formData.name_ko || formData.name_en || place?.name || 'place').trim()
+        const safeName = baseName
+          .replace(/\s+/g, '_')
+          .replace(/[^\w\-]+/g, '')
+          .slice(0, 60) || 'place'
+        const thumbnailPath = `places/${timestamp}_${safeName}.${fileExtension}`
 
         const { data: uploadData, error: uploadError } = await db.uploadImage(compressedFile, thumbnailPath)
 
