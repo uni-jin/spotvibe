@@ -1541,7 +1541,9 @@ function App() {
       
       // 메인 이미지 압축
       const compressedMainImage = await compressImage(postMainImage)
-      const mainImagePath = `${userId}/${timestamp}_main_${compressedMainImage.name.replace(/\.[^/.]+$/, '.jpg')}`
+      const mainImageFileName = (compressedMainImage?.name || postMainImage?.name || 'main.jpg')
+        .replace(/\.[^/.]+$/, '.jpg')
+      const mainImagePath = `${userId}/${timestamp}_main_${mainImageFileName}`
       const { data: mainImageData, error: mainImageError } = await db.uploadImage(compressedMainImage, mainImagePath)
       
       if (mainImageError) {
@@ -1556,7 +1558,9 @@ function App() {
         const img = postAdditionalImages[i]
         // 추가 이미지 압축
         const compressedImg = await compressImage(img)
-        const imgPath = `${userId}/${timestamp}_additional_${i}_${compressedImg.name.replace(/\.[^/.]+$/, '.jpg')}`
+        const additionalFileName = (compressedImg?.name || img?.name || `additional_${i}.jpg`)
+          .replace(/\.[^/.]+$/, '.jpg')
+        const imgPath = `${userId}/${timestamp}_additional_${i}_${additionalFileName}`
         const { data: imgData, error: imgError } = await db.uploadImage(compressedImg, imgPath)
         
         if (imgError) {
