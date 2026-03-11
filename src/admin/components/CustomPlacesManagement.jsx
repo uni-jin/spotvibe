@@ -3,6 +3,14 @@ import { getCustomPlaceNames, promoteCustomPlace, getCommonCodes } from '../../l
 import { db } from '../../lib/supabase'
 import imageCompression from 'browser-image-compression'
 
+function formatCommonCodeLabel(code) {
+  if (!code) return ''
+  const ko = (code.code_label_ko ?? code.code_label ?? '').trim()
+  const en = (code.code_label_en ?? '').trim()
+  if (ko && en && ko !== en) return `${ko} (${en})`
+  return ko || en || ''
+}
+
 const CustomPlacesManagement = () => {
   const [customPlaces, setCustomPlaces] = useState([])
   const [categories, setCategories] = useState([])
@@ -200,8 +208,13 @@ const PromotePlaceForm = ({ customPlace, categories, onClose, onSuccess }) => {
       if (thumbnailFile) {
         const compressedFile = await compressImage(thumbnailFile)
         const timestamp = Date.now()
-        const fileExtension = compressedFile.name.split('.').pop() || 'jpg'
-        const thumbnailPath = `places/${timestamp}_${formData.name.replace(/\s+/g, '_')}.${fileExtension}`
+        const fileExtension = compressedFile?.name?.split('.').pop() || 'jpg'
+        const baseName = (formData.name || formData.name_en || customPlace?.place_name || 'place').trim()
+        const safeName = baseName
+          .replace(/\s+/g, '_')
+          .replace(/[^\w\-]+/g, '')
+          .slice(0, 60) || 'place'
+        const thumbnailPath = `places/${timestamp}_${safeName}.${fileExtension}`
 
         const { data: uploadData, error: uploadError } = await db.uploadImage(compressedFile, thumbnailPath)
 
@@ -272,7 +285,7 @@ const PromotePlaceForm = ({ customPlace, categories, onClose, onSuccess }) => {
               <option value="">카테고리 선택</option>
               {categories.map((cat) => (
                 <option key={cat.id} value={cat.code_value}>
-                  {cat.code_label}
+                  {formatCommonCodeLabel(cat)}
                 </option>
               ))}
             </select>

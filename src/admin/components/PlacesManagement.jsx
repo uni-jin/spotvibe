@@ -406,8 +406,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">장소명</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">카테고리</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">최근 상태</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-24">포스팅 수</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-32">픽 / 댓글</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-28">활성화</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-48">노출기간</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">등록일</th>
@@ -418,8 +417,9 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   {filteredPlaces.length > 0 ? (
                     filteredPlaces.map((place) => {
                       const category = categories.find(c => c.code_value === place.type)
-                      const recentParts = formatDateParts(place.recentPostTime)
                       const createdParts = formatDateParts(place.created_at)
+                      const pickCount = place.pickCount || 0
+                      const commentCount = place.commentCount || 0
                       return (
                         <tr key={place.id} className="hover:bg-gray-800/50">
                           <td className="px-6 py-4">
@@ -428,23 +428,8 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {formatCommonCodeLabel(category) || place.type || '-'}
                           </td>
-                          <td className="px-6 py-4 align-top">
-                            {place.recentVibe ? (
-                              <span className="text-sm text-[#ADFF2F]">
-                                {getVibeLabel(place.recentVibe)}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-gray-500">-</span>
-                            )}
-                            {recentParts && (
-                              <div className="text-xs text-gray-500 mt-1 leading-tight">
-                                <div>{recentParts.date}</div>
-                                <div>{recentParts.time}</div>
-                              </div>
-                            )}
-                          </td>
                           <td className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap">
-                            {place.postCount || 0}개
+                            {pickCount} / {commentCount}개
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span
@@ -481,7 +466,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="8" className="px-6 py-8 text-center text-gray-400">
+                      <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
                         {places.length === 0 ? '등록된 장소가 없습니다.' : '검색 결과가 없습니다.'}
                       </td>
                     </tr>
@@ -556,6 +541,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   const [selectedTags, setSelectedTags] = useState(Array.isArray(place?.hashtags) ? place.hashtags : [])
   const [thumbnailFile, setThumbnailFile] = useState(null)
   const [thumbnailPreview, setThumbnailPreview] = useState(place?.thumbnail_url || null)
+  const [shouldRemoveThumbnail, setShouldRemoveThumbnail] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState('')
@@ -692,6 +678,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     reader.readAsDataURL(file)
 
     setThumbnailFile(file)
+    setShouldRemoveThumbnail(false)
     setError('')
   }
 
@@ -733,12 +720,22 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     try {
       let thumbnailUrl = place?.thumbnail_url || null
 
+      // 기존 대표사진 삭제 요청 (새 파일 업로드가 있으면 업로드가 우선)
+      if (shouldRemoveThumbnail && !thumbnailFile) {
+        thumbnailUrl = null
+      }
+
       // Upload thumbnail if new file selected
       if (thumbnailFile) {
         const compressedFile = await compressImage(thumbnailFile)
         const timestamp = Date.now()
-        const fileExtension = compressedFile.name.split('.').pop() || 'jpg'
-        const thumbnailPath = `places/${timestamp}_${formData.name.replace(/\s+/g, '_')}.${fileExtension}`
+        const fileExtension = compressedFile?.name?.split('.').pop() || 'jpg'
+        const baseName = (formData.name_ko || formData.name_en || place?.name || 'place').trim()
+        const safeName = baseName
+          .replace(/\s+/g, '_')
+          .replace(/[^\w\-]+/g, '')
+          .slice(0, 60) || 'place'
+        const thumbnailPath = `places/${timestamp}_${safeName}.${fileExtension}`
 
         const { data: uploadData, error: uploadError } = await db.uploadImage(compressedFile, thumbnailPath)
 
@@ -858,12 +855,32 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             대표사진 <span className="text-gray-500 text-xs">(선택)</span>
           </label>
           {thumbnailPreview && (
-            <div className="mb-4 max-w-md max-h-64 flex items-center justify-center rounded-lg border border-gray-700 overflow-hidden bg-gray-800">
-              <img
-                src={thumbnailPreview}
-                alt="Thumbnail preview"
-                className="max-w-full max-h-64 w-auto h-auto object-contain"
-              />
+            <div className="mb-4">
+              <div className="max-w-md max-h-64 flex items-center justify-center rounded-lg border border-gray-700 overflow-hidden bg-gray-800">
+                <img
+                  src={thumbnailPreview}
+                  alt="Thumbnail preview"
+                  className="max-w-full max-h-64 w-auto h-auto object-contain"
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setThumbnailFile(null)
+                    setThumbnailPreview(null)
+                    setShouldRemoveThumbnail(true)
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:border-red-400/60 hover:text-red-300 transition-colors"
+                >
+                  대표사진 삭제
+                </button>
+                {shouldRemoveThumbnail && (
+                  <span className="text-xs text-gray-400">
+                    저장하면 대표사진이 제거됩니다.
+                  </span>
+                )}
+              </div>
             </div>
           )}
           <input

@@ -347,6 +347,44 @@ export const getAdminPlaces = async () => {
       }
     })
 
+    // 댓글 수 집계 (place_comments)
+    const commentsByPlace = {}
+    try {
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('place_comments')
+        .select('place_id')
+        .in('place_id', placeIds)
+
+      if (!commentsError && Array.isArray(commentsData)) {
+        commentsData.forEach((row) => {
+          if (!row.place_id) return
+          if (!commentsByPlace[row.place_id]) commentsByPlace[row.place_id] = 0
+          commentsByPlace[row.place_id] += 1
+        })
+      }
+    } catch (err) {
+      console.error('Error aggregating place comments for admin:', err)
+    }
+
+    // 픽 수 집계 (user_place_picks)
+    const picksByPlace = {}
+    try {
+      const { data: picksData, error: picksError } = await supabase
+        .from('user_place_picks')
+        .select('place_id')
+        .in('place_id', placeIds)
+
+      if (!picksError && Array.isArray(picksData)) {
+        picksData.forEach((row) => {
+          if (!row.place_id) return
+          if (!picksByPlace[row.place_id]) picksByPlace[row.place_id] = 0
+          picksByPlace[row.place_id] += 1
+        })
+      }
+    } catch (err) {
+      console.error('Error aggregating place picks for admin:', err)
+    }
+
     // Get admin usernames for created_by (if exists)
     const adminIds = [...new Set(places.map(p => p.created_by).filter(Boolean))]
     let adminMap = {}
@@ -364,7 +402,7 @@ export const getAdminPlaces = async () => {
       }
     }
 
-    // Combine places with post stats (최근 상태 = 촬영 일시 기준 최신 포스트의 Vibe / 촬영 일시 표시)
+    // Combine places with stats (최근 상태, 포스팅 수, 픽/댓글 수 등)
     return places.map(place => {
       const placePosts = postsByPlace[place.id] || []
       // 촬영 일시(metadata.capturedAt) 기준 내림차순 정렬 후 최신 1건 사용
@@ -372,12 +410,17 @@ export const getAdminPlaces = async () => {
       const latestPost = sortedByCaptured[0] || null
       const capturedAt = latestPost?.metadata?.capturedAt || latestPost?.created_at || null
 
+      const commentCount = commentsByPlace[place.id] || 0
+      const pickCount = picksByPlace[place.id] || 0
+
       return {
         ...place,
         display_periods: periodsByPlace[place.id] || null,
         recentVibe: latestPost?.vibe || null,
         recentPostTime: capturedAt,
         postCount: placePosts.length,
+        commentCount,
+        pickCount,
         createdByUsername: place.created_by ? adminMap[place.created_by] : null
       }
     })
