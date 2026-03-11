@@ -1963,7 +1963,11 @@ function App() {
     // popup_store 타입만 대상
     const popupSpots = hotSpots
       .filter((spot) => spot.type === 'popup_store')
-      .filter((spot) => (showRunningOnly ? spot.displayStatus === 'active' : true))
+      .filter((spot) =>
+        showRunningOnly
+          ? (spot.displayStatus === 'active' || spot.displayStatus === 'unlimited')
+          : true
+      )
 
     // 장소별 통계 (Latest/Hot 정렬용) - placeId가 없을 수 있어 name 기준
     const statsByPlaceName = {}

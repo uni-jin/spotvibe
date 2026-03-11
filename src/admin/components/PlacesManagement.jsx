@@ -556,6 +556,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   const [selectedTags, setSelectedTags] = useState(Array.isArray(place?.hashtags) ? place.hashtags : [])
   const [thumbnailFile, setThumbnailFile] = useState(null)
   const [thumbnailPreview, setThumbnailPreview] = useState(place?.thumbnail_url || null)
+  const [shouldRemoveThumbnail, setShouldRemoveThumbnail] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState('')
@@ -692,6 +693,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     reader.readAsDataURL(file)
 
     setThumbnailFile(file)
+    setShouldRemoveThumbnail(false)
     setError('')
   }
 
@@ -732,6 +734,11 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
 
     try {
       let thumbnailUrl = place?.thumbnail_url || null
+
+      // 기존 대표사진 삭제 요청 (새 파일 업로드가 있으면 업로드가 우선)
+      if (shouldRemoveThumbnail && !thumbnailFile) {
+        thumbnailUrl = null
+      }
 
       // Upload thumbnail if new file selected
       if (thumbnailFile) {
@@ -863,12 +870,32 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             대표사진 <span className="text-gray-500 text-xs">(선택)</span>
           </label>
           {thumbnailPreview && (
-            <div className="mb-4 max-w-md max-h-64 flex items-center justify-center rounded-lg border border-gray-700 overflow-hidden bg-gray-800">
-              <img
-                src={thumbnailPreview}
-                alt="Thumbnail preview"
-                className="max-w-full max-h-64 w-auto h-auto object-contain"
-              />
+            <div className="mb-4">
+              <div className="max-w-md max-h-64 flex items-center justify-center rounded-lg border border-gray-700 overflow-hidden bg-gray-800">
+                <img
+                  src={thumbnailPreview}
+                  alt="Thumbnail preview"
+                  className="max-w-full max-h-64 w-auto h-auto object-contain"
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setThumbnailFile(null)
+                    setThumbnailPreview(null)
+                    setShouldRemoveThumbnail(true)
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:border-red-400/60 hover:text-red-300 transition-colors"
+                >
+                  대표사진 삭제
+                </button>
+                {shouldRemoveThumbnail && (
+                  <span className="text-xs text-gray-400">
+                    저장하면 대표사진이 제거됩니다.
+                  </span>
+                )}
+              </div>
             </div>
           )}
           <input
