@@ -223,6 +223,7 @@ export const db = {
       wait: place.wait_time,
       lat: place.lat,
       lng: place.lng,
+      address: place.address,
       thumbnail_url: place.thumbnail_url,
       description: place.description,
       created_at: place.created_at,

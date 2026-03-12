@@ -2332,6 +2332,11 @@ function App() {
                   <p className="text-lg font-semibold">
                     {spot.name}
                   </p>
+                {spot.address && (
+                  <p className="text-xs text-gray-300">
+                    {spot.address}
+                  </p>
+                )}
                   {spot.distance !== undefined && (
                     <p className="text-xs text-gray-300">
                       {formatDistance(spot.distance)} away

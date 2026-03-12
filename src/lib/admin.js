@@ -618,6 +618,20 @@ export const savePlace = async (placeData, placeId = null) => {
     }
 
     const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+
+    // 주소 컬럼은 별도의 update로 반영 (기존 RPC 시그니처 유지)
+    try {
+      if (result?.id) {
+        await supabase
+          .from('places')
+          .update({ address: placeData.address || null })
+          .eq('id', result.id)
+      }
+    } catch (addressError) {
+      console.error('Error updating place address:', addressError)
+      // 주소 업데이트 실패는 전체 저장 실패로 보지 않고 로그만 남김
+    }
+
     return { success: true, data: result }
   } catch (error) {
     console.error('Error saving place:', error)
