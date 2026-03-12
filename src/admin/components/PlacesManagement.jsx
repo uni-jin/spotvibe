@@ -522,6 +522,7 @@ function getTodayDateString() {
 }
 
 const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeletePlace }) => {
+  const sdkReady = useNaverMapSdk()
   const initialPeriods = initialDisplayPeriods(place)
   const [formData, setFormData] = useState({
     // 다국어 장소명/설명: name(ko), name_en(en), description(ko), description_en(en)
@@ -532,6 +533,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
     description_en: place?.description_en || '',
     lat: place?.lat || '',
     lng: place?.lng || '',
+    address: place?.address || '',
     is_active: place?.is_active !== undefined ? place.is_active : true,
     display_periods: initialPeriods.length > 0 ? initialPeriods : [],
     unlimited_display: initialPeriods.length === 0,
@@ -560,6 +562,64 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   )
   const [mapZoom, setMapZoom] = useState(place?.lat && place?.lng ? 16 : 13)
 
+  // 편집 시 좌표만 있고 주소가 비어 있으면 역지오코딩으로 주소 자동 채우기
+  useEffect(() => {
+    if (!place?.lat || !place?.lng || place?.address) return
+    const latNum = parseFloat(place.lat)
+    const lngNum = parseFloat(place.lng)
+    if (isNaN(latNum) || isNaN(lngNum)) return
+    if (!window.naver?.maps?.Service?.reverseGeocode) return
+    window.naver.maps.Service.reverseGeocode(
+      { location: new naver.maps.LatLng(latNum, lngNum) },
+      (status, response) => {
+        if (status !== naver.maps.Service.Status.OK) return
+        const items = response?.result?.items
+        if (items?.length) {
+          const roadItem = items.find((i) => i.isRoadAddress)
+          const addr = roadItem ? roadItem.address : items[0].address
+          if (addr) setFormData((prev) => ({ ...prev, address: addr }))
+          return
+        }
+        const v2Addr = response?.v2?.addresses?.[0]
+        if (v2Addr) {
+          const addr = v2Addr.roadAddress || v2Addr.jibunAddress || v2Addr.address || ''
+          if (addr) setFormData((prev) => ({ ...prev, address: addr }))
+        }
+      }
+    )
+  }, [place?.id])
+
+  /** 핀 위치(위경도)로 역지오코딩 후 도로명 주소를 formData.address에 자동 반영 */
+  const updateAddressFromLatLng = (lat, lng) => {
+    const latNum = typeof lat === 'string' ? parseFloat(lat) : lat
+    const lngNum = typeof lng === 'string' ? parseFloat(lng) : lng
+    if (!window.naver?.maps?.Service?.reverseGeocode || isNaN(latNum) || isNaN(lngNum)) return
+
+    window.naver.maps.Service.reverseGeocode(
+      { location: new naver.maps.LatLng(latNum, lngNum) },
+      (status, response) => {
+        if (status !== naver.maps.Service.Status.OK) {
+          setFormData((prev) => ({ ...prev, address: prev.address || '' }))
+          return
+        }
+        // v3: response.result.items
+        const items = response?.result?.items
+        if (items?.length) {
+          const roadItem = items.find((i) => i.isRoadAddress)
+          const addr = roadItem ? roadItem.address : items[0].address
+          setFormData((prev) => ({ ...prev, address: addr || '' }))
+          return
+        }
+        // v2: response.v2.addresses
+        const v2Addr = response?.v2?.addresses?.[0]
+        if (v2Addr) {
+          const addr = v2Addr.roadAddress || v2Addr.jibunAddress || v2Addr.address || ''
+          setFormData((prev) => ({ ...prev, address: addr }))
+        }
+      }
+    )
+  }
+
   const handleAddressSearch = async () => {
     const q = addressQuery.trim()
     if (!q) {
@@ -567,25 +627,73 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
       return
     }
     try {
-      setGeoMessage('주소를 찾는 중입니다...')
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
-      )
-      if (!res.ok) {
-        throw new Error('주소 검색에 실패했습니다.')
-      }
-      const data = await res.json()
-      if (!Array.isArray(data) || data.length === 0) {
-        setGeoMessage('검색 결과가 없습니다. 주소를 다시 확인해주세요.')
+      setGeoMessage('네이버 지도에서 주소를 찾는 중입니다...')
+
+      if (!window.naver || !window.naver.maps || !window.naver.maps.Service || !window.naver.maps.Service.geocode) {
+        setGeoMessage('네이버 지도가 아직 로딩되지 않았습니다. 잠시 후 다시 시도해주세요.')
         return
       }
-      const first = data[0]
-      const lat = parseFloat(first.lat)
-      const lng = parseFloat(first.lon)
+
+      const geocodeResult = await new Promise((resolve, reject) => {
+        // NCP(v3) Geocoder: query 옵션 필수, 응답은 response.v2.addresses
+        window.naver.maps.Service.geocode(
+          { query: q },
+          (status, response) => {
+            if (status !== window.naver.maps.Service.Status.OK) {
+              const hintParts = [
+                `status: ${String(status)}`,
+                response?.message ? `message: ${String(response.message)}` : null,
+                response?.errorMessage ? `errorMessage: ${String(response.errorMessage)}` : null,
+                response?.v2?.errorMessage ? `v2.errorMessage: ${String(response.v2.errorMessage)}` : null,
+              ].filter(Boolean)
+              const hint = hintParts.length ? ` (${hintParts.join(', ')})` : ''
+              return reject(new Error(`주소 검색에 실패했습니다. URL·API 키를 확인하거나 잠시 후 다시 시도해주세요.${hint}`))
+            }
+            if (!response) return reject(new Error('검색 결과가 없습니다. 주소를 다시 확인해주세요.'))
+
+            // v2 응답: response.v2.addresses
+            const v2 = response.v2?.addresses
+            if (Array.isArray(v2) && v2.length > 0) {
+              const a = v2[0]
+              const y = parseFloat(a.y)
+              const x = parseFloat(a.x)
+              if (!isNaN(y) && !isNaN(x)) {
+                const roadAddr = a.roadAddress || ''
+                const jibunAddr = a.jibunAddress || a.address || ''
+                return resolve({
+                  lat: y,
+                  lng: x,
+                  address: roadAddr || jibunAddr || q,
+                })
+              }
+            }
+
+            // (혹시) 구버전 응답: response.result.items
+            const items = response.result?.items
+            if (Array.isArray(items) && items.length > 0) {
+              const first = items[0]
+              const point = first.point
+              if (point && point.x != null && point.y != null) {
+                return resolve({
+                  lat: point.y,
+                  lng: point.x,
+                  address: first.address || q,
+                })
+              }
+            }
+
+            reject(new Error('검색 결과가 없습니다. 주소를 다시 확인해주세요.'))
+          }
+        )
+      })
+
+      const lat = Number(geocodeResult.lat)
+      const lng = Number(geocodeResult.lng)
       if (isNaN(lat) || isNaN(lng)) {
         setGeoMessage('검색 결과에서 좌표를 해석할 수 없습니다.')
         return
       }
+
       setMarkerPosition([lat, lng])
       setMapCenter([lat, lng])
       setMapZoom(17)
@@ -593,11 +701,13 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         ...prev,
         lat: lat.toString(),
         lng: lng.toString(),
+        address: geocodeResult.address || addressQuery.trim(),
       }))
+      setAddressQuery(geocodeResult.address || addressQuery.trim())
       setGeoMessage('주소를 기준으로 위치를 설정했습니다.')
     } catch (err) {
       console.error('주소 검색 오류:', err)
-      setGeoMessage('주소 검색 중 오류가 발생했습니다.')
+      setGeoMessage(err?.message || '주소 검색 중 오류가 발생했습니다.')
     }
   }
 
@@ -612,9 +722,9 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
       
       if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
         setMarkerPosition([lat, lng])
-        // 직접 입력 시에만 mapCenter 업데이트 (지도 클릭/드래그 시에는 업데이트하지 않음)
         setMapCenter([lat, lng])
-        setMapZoom(16) // 직접 입력 시에는 확대
+        setMapZoom(16)
+        updateAddressFromLatLng(lat, lng)
       }
     }
   }
@@ -766,6 +876,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         // description_en은 추후 백엔드 확장 시 전달
         lat: formData.lat,
         lng: formData.lng,
+        address: formData.address || null,
         is_active: formData.is_active,
         display_periods,
         unlimited_display: formData.unlimited_display,
@@ -900,7 +1011,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           {/* 주소 검색 */}
           <div className="mb-3 flex flex-wrap gap-2 items-end">
             <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs text-gray-400 mb-1">주소 검색 (도로명/지번)</label>
+              <label className="block text-xs text-gray-400 mb-1">주소 검색 (네이버 지도 도로명/지번)</label>
               <input
                 type="text"
                 value={addressQuery}
@@ -911,19 +1022,21 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                 onKeyDown={async (e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    await handleAddressSearch()
+                    if (sdkReady) await handleAddressSearch()
                   }
                 }}
-                placeholder="예: 서울 성동구 성수이로 89"
-                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white"
+                placeholder={sdkReady ? '예: 서울 성동구 성수이로 89' : '지도 로딩 중…'}
+                disabled={!sdkReady}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <button
               type="button"
               onClick={handleAddressSearch}
-              className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors text-sm font-semibold"
+              disabled={!sdkReady}
+              className="px-4 py-2 bg-[#ADFF2F] text-black rounded-lg hover:bg-[#ADFF2F]/90 transition-colors text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              검색
+              {sdkReady ? '검색' : '로딩 중…'}
             </button>
           </div>
           {geoMessage && (
@@ -941,7 +1054,8 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             lat={formData.lat}
             lng={formData.lng}
             onChangeLatLng={(newLat, newLng) => {
-              setFormData(prev => ({ ...prev, lat: newLat, lng: newLng }))
+              setFormData((prev) => ({ ...prev, lat: newLat, lng: newLng }))
+              updateAddressFromLatLng(newLat, newLng)
             }}
           />
 
@@ -1061,6 +1175,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                     </div>
                   </div>
                 )}
+
                 {tagGroups?.benefit?.length > 0 && (
                   <div>
                     <p className="text-[11px] text-gray-400 mb-1">Benefits</p>

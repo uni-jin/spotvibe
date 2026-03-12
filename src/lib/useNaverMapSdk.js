@@ -19,7 +19,7 @@ function loadNaverMapSdk() {
 
   sdkLoadPromise = new Promise((resolve) => {
     const script = document.createElement('script')
-    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`
+    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}&submodules=geocoder`
     script.async = true
     script.onload = () => resolve(true)
     script.onerror = () => {
