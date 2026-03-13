@@ -96,9 +96,9 @@ export const formatDistance = (distance) => {
   if (distance < 1) {
     // 1km 미만: 미터 단위로 표시 (소수점 없이)
     const meters = Math.round(distance * 1000)
-    return `${meters}m away`
+    return `${meters}m`
   } else {
     // 1km 이상: 킬로미터 단위로 표시 (소수점 1자리)
-    return `${distance.toFixed(1)}km away`
+    return `${distance.toFixed(1)}km`
   }
 }
