@@ -214,29 +214,47 @@ export const db = {
         item.displayStatus === 'unlimited'
     )
 
-    return filtered.map(({ place, display_periods, displayStatus, commentStat }) => ({
-      id: place.id,
-      name: place.name,
-      nameEn: place.name_en,
-      type: place.type,
-      status: place.status,
-      wait: place.wait_time,
-      lat: place.lat,
-      lng: place.lng,
-      address: place.address,
-      thumbnail_url: place.thumbnail_url,
-      description: place.description,
-      created_at: place.created_at,
-      display_start_date: place.display_start_date,
-      display_end_date: place.display_end_date,
-      display_periods: display_periods || undefined,
-      info_url: place.info_url,
-      phone: place.phone,
-      hashtags: place.hashtags || [],
-      displayStatus,
-      commentCount: commentStat.count || 0,
-      latestCommentAt: commentStat.latestCommentAt || null,
-    }))
+    return filtered.map(({ place, display_periods, displayStatus, commentStat }) => {
+      // description 컬럼: plain string 또는 {"ko","en"} JSON 모두 지원
+      let descKo = place.description || ''
+      let descEn = null
+      if (typeof place.description === 'string' && place.description.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(place.description)
+          if (parsed && typeof parsed === 'object' && ('ko' in parsed || 'en' in parsed)) {
+            descKo = parsed.ko ?? ''
+            descEn = parsed.en ?? null
+          }
+        } catch {
+          // JSON 파싱 실패 시 기존 문자열 그대로 사용
+        }
+      }
+
+      return {
+        id: place.id,
+        name: place.name,
+        nameEn: place.name_en,
+        type: place.type,
+        status: place.status,
+        wait: place.wait_time,
+        lat: place.lat,
+        lng: place.lng,
+        address: place.address,
+        thumbnail_url: place.thumbnail_url,
+        description: descKo,
+        description_en: descEn,
+        created_at: place.created_at,
+        display_start_date: place.display_start_date,
+        display_end_date: place.display_end_date,
+        display_periods: display_periods || undefined,
+        info_url: place.info_url,
+        phone: place.phone,
+        hashtags: place.hashtags || [],
+        displayStatus,
+        commentCount: commentStat.count || 0,
+        latestCommentAt: commentStat.latestCommentAt || null,
+      }
+    })
   },
 
   // Create a new post

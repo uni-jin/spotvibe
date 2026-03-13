@@ -868,12 +868,21 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
             })
             .filter((p) => p.start != null && p.end != null)
 
+      // 설명 다국어: description 컬럼 하나에 JSON(ko/en) 형태로 저장 (기존 plain string과 호환)
+      let combinedDescription = (formData.description_ko || '').trim()
+      const descEn = (formData.description_en || '').trim()
+      if (combinedDescription && descEn) {
+        combinedDescription = JSON.stringify({ ko: combinedDescription, en: descEn })
+      } else if (!combinedDescription && descEn) {
+        // 한국어 없이 영어만 있는 경우도 허용
+        combinedDescription = JSON.stringify({ ko: '', en: descEn })
+      }
+
       const payload = {
         name: formData.name_ko.trim(),
         name_en: formData.name_en?.trim() || null,
         type: formData.type,
-        description: formData.description_ko || '',
-        // description_en은 추후 백엔드 확장 시 전달
+        description: combinedDescription || '',
         lat: formData.lat,
         lng: formData.lng,
         address: formData.address || null,
@@ -1090,20 +1099,37 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
           </div>
         </div>
 
-        {/* Description (KO) & Links */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex flex-col h-full">
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              설명 (한국어) <span className="text-gray-500 text-xs">(선택)</span>
-            </label>
-            <textarea
-              value={formData.description_ko}
-              onChange={(e) => handleInputChange('description_ko', e.target.value)}
-              rows={6}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none flex-1 min-h-[160px]"
-              placeholder="장소에 대한 설명을 한국어로 입력하세요..."
-            />
+        {/* Description (KO/EN) */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium mb-2 text-gray-300">
+            설명 <span className="text-gray-500 text-xs">(한국어 / 영어, 선택)</span>
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col h-full">
+              <span className="text-xs text-gray-400 mb-1">한국어</span>
+              <textarea
+                value={formData.description_ko}
+                onChange={(e) => handleInputChange('description_ko', e.target.value)}
+                rows={6}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none flex-1 min-h-[320px]"
+                placeholder="장소에 대한 설명을 한국어로 입력하세요..."
+              />
+            </div>
+            <div className="flex flex-col h-full">
+              <span className="text-xs text-gray-400 mb-1">English</span>
+              <textarea
+                value={formData.description_en}
+                onChange={(e) => handleInputChange('description_en', e.target.value)}
+                rows={6}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none flex-1 min-h-[320px]"
+                placeholder="Description in English (for international users)..."
+              />
+            </div>
           </div>
+        </div>
+
+        {/* Links & Tags */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium mb-2 text-gray-300">
@@ -1129,19 +1155,8 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
                 placeholder="예: 02-123-4567"
               />
             </div>
-            {/* Description (English) – 추후 사용자 화면에서 사용 예정 */}
-            <div>
-              <label className="block text-sm font-medium mb-2 text-gray-300">
-                설명 (영어) <span className="text-gray-500 text-xs">(선택)</span>
-              </label>
-              <textarea
-                value={formData.description_en}
-                onChange={(e) => handleInputChange('description_en', e.target.value)}
-                rows={4}
-                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-[#ADFF2F] text-white resize-none"
-                placeholder="Description in English (for international users)..."
-              />
-            </div>
+          </div>
+          <div>
             {/* Tags from common codes */}
             <div>
               <label className="block text-sm font-medium mb-2 text-gray-300">
