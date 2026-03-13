@@ -404,6 +404,21 @@ export const getAdminPlaces = async () => {
 
     // Combine places with stats (최근 상태, 포스팅 수, 픽/댓글 수 등)
     return places.map(place => {
+      // description: plain string 또는 {"ko","en"} JSON 지원 (관리자 폼에서 사용)
+      let descKo = place.description || ''
+      let descEn = null
+      if (typeof place.description === 'string' && place.description.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(place.description)
+          if (parsed && typeof parsed === 'object' && ('ko' in parsed || 'en' in parsed)) {
+            descKo = parsed.ko ?? ''
+            descEn = parsed.en ?? null
+          }
+        } catch {
+          // ignore parse error, fallback to raw description
+        }
+      }
+
       const placePosts = postsByPlace[place.id] || []
       // 촬영 일시(metadata.capturedAt) 기준 내림차순 정렬 후 최신 1건 사용
       const sortedByCaptured = [...placePosts].sort((a, b) => getCapturedAt(b) - getCapturedAt(a))
@@ -415,6 +430,8 @@ export const getAdminPlaces = async () => {
 
       return {
         ...place,
+        description: descKo,
+        description_en: descEn,
         display_periods: periodsByPlace[place.id] || null,
         recentVibe: latestPost?.vibe || null,
         recentPostTime: capturedAt,
@@ -618,6 +635,22 @@ export const savePlace = async (placeData, placeId = null) => {
     }
 
     const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+
+    // 주소 컬럼은 별도의 update로 반영 (기존 RPC 시그니처 유지)
+    try {
+      if (result?.id) {
+        await supabase
+          .from('places')
+          .update({
+            address: placeData.address || null,
+          })
+          .eq('id', result.id)
+      }
+    } catch (addressError) {
+      console.error('Error updating place extra fields:', addressError)
+      // 추가 필드 업데이트 실패는 전체 저장 실패로 보지 않고 로그만 남김
+    }
+
     return { success: true, data: result }
   } catch (error) {
     console.error('Error saving place:', error)

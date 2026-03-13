@@ -71,6 +71,7 @@ function LiveRadarNaverMap({
   onPostClick,
   getSpotPopupHtml,
   getPostPopupHtml,
+  lang,
 }) {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
@@ -137,6 +138,13 @@ function LiveRadarNaverMap({
     lastCenterRef.current = [lat, lng]
     map.setCenter(new naver.maps.LatLng(lat, lng))
   }, [center])
+
+  // 언어 변경 시 열린 인포윈도우는 닫아서 언어 불일치 상태 방지
+  useEffect(() => {
+    if (infoWindowRef.current) {
+      infoWindowRef.current.close()
+    }
+  }, [lang])
 
   useEffect(() => {
     const map = mapInstanceRef.current
@@ -748,6 +756,7 @@ function App() {
             lng: place.lng,
             thumbnail_url: place.thumbnail_url,
             description: place.description,
+            description_en: place.description_en,
             created_at: place.created_at ? new Date(place.created_at) : null,
             display_start_date: place.display_start_date,
             display_end_date: place.display_end_date,
@@ -818,6 +827,28 @@ function App() {
 
     loadPlaces()
   }, [userLocation, vibePosts])
+
+  // 로그인 후 프로필 이름/사진은 profiles 테이블 값을 우선 사용 (재로그인 시에도 유지)
+  useEffect(() => {
+    const syncProfileFromDb = async () => {
+      if (!user?.id) return
+      try {
+        const profile = await db.getUserProfile(user.id)
+        if (!profile) return
+        setUser((prev) => {
+          if (!prev || prev.id !== user.id) return prev
+          return {
+            ...prev,
+            name: profile.full_name || prev.name,
+            avatar: profile.avatar_url ?? prev.avatar,
+          }
+        })
+      } catch (err) {
+        console.error('Failed to sync user profile from DB:', err)
+      }
+    }
+    syncProfileFromDb()
+  }, [user?.id])
 
   // 사용자 세션 확인 및 인증 상태 관리
   useEffect(() => {
@@ -1850,11 +1881,15 @@ function App() {
   }
 
   // 혼잡도/Vibe 라벨 (Discover·Feed 공통 — 최신 포스트 30분 이내만 표시)
-  const getFreshVibeLabelForSpot = (spot) => {
+    const getFreshVibeLabelForSpot = (spot) => {
     const now = new Date()
     const postsForPlace = vibePosts.filter((p) => {
       const placeName = p.placeName || p.place_name
-      return (p.placeId && p.placeId === spot.id) || (placeName && (placeName === spot.name || placeName === spot.name_en))
+        const spotNameEn = spot.name_en ?? spot.nameEn
+        return (
+          (p.placeId && p.placeId === spot.id) ||
+          (placeName && (placeName === spot.name || (spotNameEn && placeName === spotNameEn)))
+        )
     })
     if (postsForPlace.length === 0) return null
     const latest = postsForPlace.reduce((acc, cur) => {
@@ -2014,9 +2049,13 @@ function App() {
 
     const getFreshVibeLabel = (spot) => {
       const now = new Date()
-      const postsForPlace = vibePosts.filter(
-        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && (p.placeName === spot.name || p.placeName === spot.name_en))
-      )
+      const postsForPlace = vibePosts.filter((p) => {
+        const spotNameEn = spot.name_en ?? spot.nameEn
+        return (
+          (p.placeId && p.placeId === spot.id) ||
+          (p.placeName && (p.placeName === spot.name || (spotNameEn && p.placeName === spotNameEn)))
+        )
+      })
       if (postsForPlace.length === 0) return null
       const latest = postsForPlace.reduce((acc, cur) => {
         const t = cur.metadata?.capturedAt
@@ -2119,18 +2158,25 @@ function App() {
                   className="cursor-pointer overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/60 hover:border-[#ADFF2F]/60 transition-all relative"
                 >
                   {/* Pick 버튼: 카드 클릭과 분리 */}
-                  <button
-                    type="button"
-                    onClick={(e) => handleTogglePlacePick(spot.id, e)}
-                    className="absolute top-2 right-2 z-10 w-9 h-9 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 transition-colors"
-                    aria-label={isPicked ? (lang === 'ko' ? '픽 해제' : 'Unpick') : (lang === 'ko' ? '픽하기' : 'Pick')}
-                  >
-                    {isPicked ? (
-                      <svg className="w-5 h-5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                    ) : (
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                  <div className="absolute w-full flex items-center justify-between p-3">
+                    {dday && (
+                        <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
+                          {dday}
+                        </span>
                     )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleTogglePlacePick(spot.id, e)}
+                      className="z-10 w-9 h-9 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 transition-colors"
+                      aria-label={isPicked ? (lang === 'ko' ? '픽 해제' : 'Unpick') : (lang === 'ko' ? '픽하기' : 'Pick')}
+                    >
+                      {isPicked ? (
+                        <svg className="w-5 h-5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                      ) : (
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                      )}
+                    </button>
+                  </div>
                   {/* 이미지 영역: 오버레이 없이 썸네일만 깔끔하게 표시 */}
                   <div className="w-full overflow-hidden bg-gray-800 flex items-center justify-center">
                     {spot.thumbnail_url ? (
@@ -2149,13 +2195,8 @@ function App() {
                   {/* Info area under image: 장소명, D-day, 기간, 태그 */}
                   <div className="px-4 py-3 space-y-1.5">
                     <p className="text-sm font-semibold">
-                      {lang === 'en' && spot.name_en ? spot.name_en : spot.name}
+                      {lang === 'en' ? (spot.name_en ?? spot.nameEn ?? spot.name) : spot.name}
                     </p>
-                    {dday && (
-                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold bg-black/80 text-[#ADFF2F] border border-[#ADFF2F]/60">
-                        {dday}
-                      </span>
-                    )}
                     {formatDisplayPeriodShortForSpot(spot) && (
                       <p className="text-xs text-gray-400">
                         {formatDisplayPeriodShortForSpot(spot)}
@@ -2222,9 +2263,13 @@ function App() {
     const dday = getDDayBadgeLabel(spot)
     const now = new Date()
     const vibeFresh = (() => {
-      const postsForPlace = vibePosts.filter(
-        (p) => (p.placeId && p.placeId === spot.id) || (p.placeName && (p.placeName === spot.name || p.placeName === spot.name_en))
-      )
+      const postsForPlace = vibePosts.filter((p) => {
+        const spotNameEn = spot.name_en ?? spot.nameEn
+        return (
+          (p.placeId && p.placeId === spot.id) ||
+          (p.placeName && (p.placeName === spot.name || (spotNameEn && p.placeName === spotNameEn)))
+        )
+      })
       if (postsForPlace.length === 0) return null
       const latest = postsForPlace.reduce((acc, cur) => {
         const t = cur.metadata?.capturedAt
@@ -2328,8 +2373,13 @@ function App() {
 
                 <div className="space-y-1">
                   <p className="text-lg font-semibold">
-                    {spot.name}
+                    {lang === 'en' ? (spot.name_en ?? spot.nameEn ?? spot.name) : spot.name}
                   </p>
+                {spot.address && (
+                  <p className="text-xs text-gray-300">
+                    {spot.address}
+                  </p>
+                )}
                   {spot.distance !== undefined && (
                     <p className="text-xs text-gray-300">
                       {formatDistance(spot.distance)} away
@@ -2368,12 +2418,19 @@ function App() {
                 </p>
               )}
 
-              {/* 설명 */}
-              {spot.description && (
-                <p className="text-sm text-gray-200 mt-1 whitespace-pre-line">
-                  {spot.description}
-                </p>
-              )}
+              {/* 설명 (다국어) */}
+              {(() => {
+                const desc =
+                  lang === 'en'
+                    ? (spot.description_en ?? spot.description)
+                    : spot.description
+                if (!desc) return null
+                return (
+                  <p className="text-sm text-gray-200 mt-1 whitespace-pre-line">
+                    {desc}
+                  </p>
+                )
+              })()}
 
               {/* Hashtags: 활성 태그만 라벨로 표시, 숨김/삭제된 태그는 미표시 */}
               {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (() => {
@@ -2556,7 +2613,7 @@ function App() {
                       }`}
                     >
                       <h3 className="font-bold text-sm mb-1">
-                        {lang === 'en' && spot.name_en ? spot.name_en : spot.name}
+                        {lang === 'en' ? (spot.name_en ?? spot.nameEn ?? spot.name) : spot.name}
                       </h3>
                       {formatDisplayPeriodForSpot(spot) && (
                         <div className="text-xs text-gray-400 mb-2 space-y-0.5">
@@ -2952,12 +3009,22 @@ function App() {
       .replace(/'/g, '&#39;')
   }
   const getSpotPopupHtml = (spot) => {
-    const name = escapeHtml(spot?.name || '')
+    const rawName =
+      lang === 'en'
+        ? (spot?.name_en ?? spot?.nameEn ?? spot?.name)
+        : spot?.name
+    const name = escapeHtml(rawName || '')
     const img = spot?.thumbnail_url ? `<div style="margin-bottom:12px;text-align:center;background:#1f2937;border-radius:8px;overflow:hidden;max-height:160px;"><img src="${escapeHtml(spot.thumbnail_url)}" alt="${name}" style="width:100%;height:auto;max-height:160px;object-fit:contain;" /></div>` : ''
     const typeLabel = spot?.type === 'popup_store' ? 'Pop-up Store' : spot?.type === 'restaurant' ? 'Restaurant' : spot?.type === 'shop' ? 'Shop' : spot?.type ? escapeHtml(spot.type) : ''
     const period = formatDisplayPeriodForSpot(spot) ? `<div style="font-size:12px;color:#ADFF2F;margin-bottom:4px;">${escapeHtml(formatDisplayPeriodForSpot(spot))}</div>` : ''
     // 인라인 스타일로 줄바꿈·2줄 말줄임 보장 (동적 HTML은 Tailwind 클래스 미적용 가능)
-    const desc = spot?.description ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px;word-break:break-word;overflow-wrap:break-word;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;">${escapeHtml(spot.description)}</div>` : ''
+    const descSource =
+      lang === 'en'
+        ? (spot?.description_en ?? spot?.description)
+        : spot?.description
+    const desc = descSource
+      ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:8px;word-break:break-word;overflow-wrap:break-word;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;">${escapeHtml(descSource)}</div>`
+      : ''
     return `<div style="color:white;font-size:14px;background:#111827;border:2px solid #ef4444;border-radius:8px;padding:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);min-width:200px;max-width:min(280px,calc(100vw - 32px));box-sizing:border-box;">${img}<div style="margin-top:8px;"><div style="font-weight:700;font-size:14px;margin-bottom:4px;">${name}</div>${typeLabel ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">${typeLabel}</div>` : ''}${period}${desc}</div><button type="button" class="naver-popup-view-detail" style="width:100%;background:#ADFF2F;color:#000;font-weight:600;padding:8px 12px;border-radius:6px;font-size:12px;margin-top:12px;border:none;cursor:pointer;">View Detail →</button></div>`
   }
   const getPostPopupHtml = (item) => {
@@ -3078,6 +3145,7 @@ function App() {
             center={mapCenter}
             mapItems={mapItems}
             sdkReady={isNaverMapSdkReady}
+            lang={lang}
             mapFocusSpot={mapFocusSpot}
             onFocusDone={() => setMapFocusSpot(null)}
             userLocation={userLocation}
