@@ -877,6 +877,21 @@ function App() {
           if (userData) {
             setUser(userData)
             console.log('User session found:', userData)
+            try {
+              const profile = await db.getUserProfile(userData.id)
+              if (profile) {
+                setUser((prev) => {
+                  if (!prev || prev.id !== userData.id) return prev
+                  return {
+                    ...prev,
+                    name: profile.full_name || prev.name,
+                    avatar: profile.avatar_url ?? prev.avatar,
+                  }
+                })
+              }
+            } catch (e) {
+              console.error('checkSession profile sync error:', e)
+            }
           }
         } else {
           console.log('No active session')
@@ -992,10 +1007,25 @@ function App() {
         setUser(null)
         console.log('User signed out')
       } else if (session?.user) {
-        // 기타 이벤트에서도 세션이 있으면 사용자 정보 업데이트
+        // 기타 이벤트(INITIAL_SESSION 등)에서도 세션이 있으면 사용자 정보 업데이트
         const userData = extractUserFromSession(session)
         if (userData) {
           setUser(userData)
+          try {
+            const profile = await db.getUserProfile(userData.id)
+            if (profile) {
+              setUser((prev) => {
+                if (!prev || prev.id !== userData.id) return prev
+                return {
+                  ...prev,
+                  name: profile.full_name || prev.name,
+                  avatar: profile.avatar_url ?? prev.avatar,
+                }
+              })
+            }
+          } catch (e) {
+            console.error('otherAuthEvent profile sync error:', e)
+          }
         }
       } else {
         setUser(null)
