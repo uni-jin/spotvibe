@@ -10,26 +10,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-function getOAuthRedirectUrl() {
-  const configuredRedirectUrl = import.meta.env.VITE_OAUTH_REDIRECT_URL
-  if (configuredRedirectUrl) return configuredRedirectUrl
-
-  const { protocol, hostname, port } = window.location
-  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1'
-
-  // Keep OAuth callback on origin only. Path-specific redirects can be rejected by Supabase allow-list.
-  if (isLocalHost) {
-    return `${protocol}//localhost${port ? `:${port}` : ''}`
-  }
-
-  return window.location.origin
-}
-
 // Auth helper functions
 export const auth = {
   // Sign in with Google
   async signInWithGoogle() {
-    const redirectTo = getOAuthRedirectUrl()
+    // 현재 URL에서 hash와 query 제거한 깨끗한 URL 사용
+    const redirectTo = `${window.location.origin}${window.location.pathname}`
     
     console.log('Initiating Google OAuth with redirectTo:', redirectTo)
     
