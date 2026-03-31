@@ -37,21 +37,6 @@ function getOAuthRedirectUrl() {
   return window.location.origin
 }
 
-function getOAuthRedirectUrl() {
-  const configuredRedirectUrl = import.meta.env.VITE_OAUTH_REDIRECT_URL
-  if (configuredRedirectUrl) return configuredRedirectUrl
-
-  const { protocol, hostname, port } = window.location
-  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1'
-
-  // Keep OAuth callback on origin only. Path-specific redirects can be rejected by Supabase allow-list.
-  if (isLocalHost) {
-    return `${protocol}//localhost${port ? `:${port}` : ''}`
-  }
-
-  return window.location.origin
-}
-
 // Auth helper functions
 export const auth = {
   // Sign in with Google
