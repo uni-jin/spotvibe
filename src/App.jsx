@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import exifr from 'exifr'
 import imageCompression from 'browser-image-compression'
@@ -13,7 +13,7 @@ import { formatUtcAsKstDisplay, formatKstDisplayDateOnly, isDateOnlyPeriod, getT
 const I18N = {
   navDiscover: { ko: '발견', en: 'Discover' },
   navMap: { ko: '지도', en: 'Map' },
-  navMy: { ko: '마이', en: 'My' },
+  navMy: { ko: '프로필', en: 'Profile' },
   discoverTitle: { ko: '발견', en: 'Discover' },
   discoverSortDistance: { ko: '거리순', en: 'Distance' },
   discoverSortLatest: { ko: '최신순', en: 'Latest' },
@@ -55,6 +55,14 @@ const I18N = {
   commentAnonymous: { ko: '익명', en: 'Anonymous' },
 }
 
+// 지역 목록(정적) — Hook 의존성 없이 마운트 시 1회만 localStorage 복원에 사용
+const APP_REGIONS = [
+  { id: 'Seongsu', name: 'Seongsu', active: true },
+  { id: 'Hongdae', name: 'Hongdae', active: false },
+  { id: 'Hannam', name: 'Hannam', active: false },
+  { id: 'Gangnam', name: 'Gangnam', active: false },
+]
+
 // 사용자 지도용 컴포넌트 — App 바깥에 두어 줌 시 setLeafletZoom 리렌더만 하고 언마운트/재마운트 되지 않도록 함 (깜빡임 방지)
 function LiveRadarNaverMap({
   center,
@@ -90,6 +98,7 @@ function LiveRadarNaverMap({
     return `<div style="position:relative;width:64px;height:80px;"><div style="position:relative;width:64px;height:64px;border-radius:50%;overflow:hidden;border:2px solid ${borderColor};background:#000;"><img src="${escaped}" alt="pin" style="width:100%;height:100%;object-fit:cover;" /></div><div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);"><div style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:8px solid ${borderColor};"></div></div></div>`
   }
 
+  // 지도 인스턴스는 SDK 준비 시 1회만 생성. center·콜백은 아래 effect에서 반영.
   useEffect(() => {
     if (!sdkReady || !window.naver?.maps || !mapRef.current || mapInstanceRef.current) return
     const map = new naver.maps.Map(mapRef.current, {
@@ -125,7 +134,7 @@ function LiveRadarNaverMap({
       lastCenterRef.current = null
       lastZoomLevelRef.current = null
     }
-  }, [sdkReady])
+  }, [sdkReady]) // eslint-disable-line react-hooks/exhaustive-deps -- 지도 1회 생성; center·콜백은 별도 effect
 
   // 중심은 “지역 선택” 등으로 실제로 바뀐 경우에만 이동. 줌 시 부모 리렌더로 center가 새 배열로 넘어와도 좌표가 같으면 setCenter 호출 안 함.
   useEffect(() => {
@@ -417,18 +426,12 @@ function MapControls({ naverMapRef, userLocation, showPickedOnlyOnMap, onToggleP
 
 function App() {
   const location = useLocation()
-  
-  // /admin 경로에서는 App 컴포넌트를 렌더링하지 않음
-  if (location.pathname.startsWith('/admin')) {
-    return null
-  }
 
   // 앱 시작 시 네이버 지도 SDK를 미리 로드해 첫 지도 진입 지연/레이스를 줄인다.
   const isNaverMapSdkReady = useNaverMapSdk()
 
   const [currentView, setCurrentView] = useState('discover')
   const [selectedRegion, setSelectedRegion] = useState(null)
-  const [selectedPlace, setSelectedPlace] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [postPlace, setPostPlace] = useState('')
   const [postCategory, setPostCategory] = useState('')
@@ -444,13 +447,18 @@ function App() {
   const [isPosting, setIsPosting] = useState(false) // Post Vibe 업로드 중 상태
   const [mapZoom, setMapZoom] = useState(1) // 1 = 클러스터, 2 = 개별 핀
   const [selectedCluster, setSelectedCluster] = useState(null)
-  const [selectedPin, setSelectedPin] = useState(null)
+  const [, setSelectedPin] = useState(null)
   const [leafletZoom, setLeafletZoom] = useState(16) // 지도 실제 확대 수준 (확대 시 클러스터 해제용)
   const [spotFilter, setSpotFilter] = useState(null) // 장소 필터링 상태
   const [selectedPost, setSelectedPost] = useState(null) // 선택된 포스트 (Detail View)
   const [user, setUser] = useState(null) // 현재 로그인한 사용자
   const [showLoginModal, setShowLoginModal] = useState(false) // 로그인 모달 표시 여부
-  const [hotSpots, setHotSpots] = useState([]) // 팝업스토어 목록 (Supabase에서 로드)
+  const [loginContext, setLoginContext] = useState(null) // 'post' | 'pick' 등 로그인 유도 출처
+  const showLoginModalRef = useRef(false)
+  const loginContextRef = useRef(null)
+  showLoginModalRef.current = showLoginModal
+  loginContextRef.current = loginContext
+  const [placesFromDb, setPlacesFromDb] = useState([]) // db.getPlaces() 원본 (vibe/정렬은 useMemo에서 파생)
   const [isLoadingPosts, setIsLoadingPosts] = useState(true) // 포스트 로딩 상태
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true) // 장소 로딩 상태
   const [categories, setCategories] = useState([]) // 카테고리 목록
@@ -478,13 +486,6 @@ function App() {
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [profileSaveError, setProfileSaveError] = useState('')
 
-  const regions = [
-    { id: 'Seongsu', name: 'Seongsu', active: true },
-    { id: 'Hongdae', name: 'Hongdae', active: false },
-    { id: 'Hannam', name: 'Hannam', active: false },
-    { id: 'Gangnam', name: 'Gangnam', active: false },
-  ]
-
   // 공통코드 카테고리 라벨: DB의 code_label_ko / code_label_en 기준 다국어 (구 code_label 호환)
   const getCategoryLabel = (cat, l) => {
     if (!cat) return ''
@@ -500,7 +501,7 @@ function App() {
   useEffect(() => {
     const savedRegionId = localStorage.getItem('selectedRegionId')
     if (savedRegionId) {
-      const savedRegion = regions.find((r) => r.id === savedRegionId)
+      const savedRegion = APP_REGIONS.find((r) => r.id === savedRegionId)
       if (savedRegion && savedRegion.active) {
         setSelectedRegion(savedRegion)
       }
@@ -620,7 +621,7 @@ function App() {
     }
 
     loadPosts()
-  }, [user])
+  }, [user?.id])
 
   // 로그인 사용자의 Pick한 장소 ID 목록 로드
   useEffect(() => {
@@ -662,7 +663,8 @@ function App() {
   const handleTogglePlacePick = async (placeId, e) => {
     if (e) e.stopPropagation()
     if (!user?.id) {
-      setShowLoginModal(true)
+      // 비로그인 상태에서는 바로 마이페이지로 이동
+      setCurrentView('my')
       return
     }
     try {
@@ -675,12 +677,15 @@ function App() {
     }
   }
 
-  // Supabase에서 팝업스토어 목록 로드 및 정렬
+  // Supabase에서 팝업스토어 목록만 로드 (위치는 useMemo에서 거리만 계산 — userLocation 변경마다 재요청하지 않음)
   useEffect(() => {
-    const loadPlaces = async () => {
+    let cancelled = false
+
+    const loadPlacesFromApi = async () => {
       try {
         setIsLoadingPlaces(true)
         setPlacesError(null)
+        await supabase.auth.getSession()
         const [places, admission, benefit, amenity, content] = await Promise.all([
           db.getPlaces(),
           getCommonCodes('place_tag_admission', false),
@@ -688,6 +693,8 @@ function App() {
           getCommonCodes('place_tag_amenity', false),
           getCommonCodes('place_tag_content', false),
         ])
+        if (cancelled) return
+
         const labelMap = {}
         ;[...(admission || []), ...(benefit || []), ...(amenity || []), ...(content || [])].forEach((c) => {
           if (!c.code_value) return
@@ -696,142 +703,149 @@ function App() {
           labelMap[c.code_value] = { ko, en }
         })
         setPlaceTagLabelMap(labelMap)
-        
-        // 장소별 포스팅 통계 (최신 Vibe 표시용) - 항상 계산
-        const vibeIdToLabel = {
-          verybusy: '🔥 Very Busy',
-          busy: '⏱️ Busy',
-          nowait: '✅ No Wait',
-          quiet: '🟢 Quiet',
-          soldout: '⚠️ Sold Out / Closed',
-        }
-        const getVibeLabel = (vibeId) => vibeIdToLabel[vibeId] || '🟢 Quiet'
-
-        const placeStats = {}
-        vibePosts.forEach((post) => {
-          const placeName = post.placeName || post.place_name
-          if (!placeName) return
-
-          if (!placeStats[placeName]) {
-            placeStats[placeName] = {
-              count: 0,
-              latestTimestamp: null,
-              latestVibe: null,
-            }
-          }
-
-          placeStats[placeName].count++
-
-          const postTime = post.timestamp
-            ? new Date(post.timestamp).getTime()
-            : (post.metadata?.capturedAt
-                ? new Date(post.metadata.capturedAt).getTime()
-                : 0)
-
-          if (
-            !placeStats[placeName].latestTimestamp ||
-            postTime > placeStats[placeName].latestTimestamp
-          ) {
-            placeStats[placeName].latestTimestamp = postTime
-            placeStats[placeName].latestVibe = post.vibe || null
-          }
-        })
-
-        // places를 hotSpots 형식으로 변환
-        // - status: 사용자 최신 Vibe 라벨
-        // - displayStatus: Supabase에서 계산된 노출 상태(active/scheduled/unlimited 등)
-        let formattedPlaces = places.map((place) => {
-          const stats = placeStats[place.name]
-          const vibeLabel = stats?.latestVibe
-            ? getVibeLabel(stats.latestVibe)
-            : (place.status || '🟢 Quiet')
-          return {
-            id: place.id,
-            name: place.name,
-            nameEn: place.nameEn || place.name,
-            type: place.type || 'other',
-            status: vibeLabel,
-            wait: place.wait || 'Quiet',
-            lat: place.lat,
-            lng: place.lng,
-            thumbnail_url: place.thumbnail_url,
-            description: place.description,
-            description_en: place.description_en,
-            created_at: place.created_at ? new Date(place.created_at) : null,
-            display_start_date: place.display_start_date,
-            display_end_date: place.display_end_date,
-            display_periods: place.display_periods,
-            displayStatus: place.displayStatus || 'active',
-            info_url: place.info_url,
-            phone: place.phone,
-            hashtags: place.hashtags || [],
-            commentCount: place.commentCount || 0,
-            latestCommentAt: place.latestCommentAt ? new Date(place.latestCommentAt) : null,
-          }
-        })
-
-        // 정렬 로직
-        if (userLocation) {
-          // GPS 위치가 있을 때: 거리순 정렬
-          formattedPlaces = formattedPlaces
-            .map((place) => {
-              if (place.lat && place.lng) {
-                const distance = calculateDistance(
-                  userLocation.lat,
-                  userLocation.lng,
-                  place.lat,
-                  place.lng
-                )
-                return { ...place, distance }
-              }
-              return place
-            })
-            .sort((a, b) => {
-              if (a.distance !== undefined && b.distance !== undefined) {
-                return a.distance - b.distance
-              }
-              if (a.distance !== undefined) return -1
-              if (b.distance !== undefined) return 1
-              return 0
-            })
-        } else {
-          // GPS 위치가 없을 때: 포스팅 수 → 최신 포스팅 시간 → 이름순
-          formattedPlaces = formattedPlaces
-            .map((place) => {
-              const stats = placeStats[place.name] || { count: 0, latestTimestamp: 0 }
-              return {
-                ...place,
-                postCount: stats.count,
-                latestPostTime: stats.latestTimestamp,
-              }
-            })
-            .sort((a, b) => {
-              if (a.postCount !== b.postCount) {
-                return b.postCount - a.postCount
-              }
-              if (a.latestPostTime !== b.latestPostTime) {
-                return (b.latestPostTime || 0) - (a.latestPostTime || 0)
-              }
-              return a.name.localeCompare(b.name)
-            })
-        }
-
-        setHotSpots(formattedPlaces)
+        setPlacesFromDb(places)
       } catch (error) {
+        if (cancelled) return
         console.error('Error loading places:', error)
         setPlacesError('Failed to load places. Please try again later.')
       } finally {
-        setIsLoadingPlaces(false)
+        if (!cancelled) {
+          setIsLoadingPlaces(false)
+        }
       }
     }
 
-    loadPlaces()
-  }, [userLocation, vibePosts])
+    loadPlacesFromApi()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
-  // 로그인 후 프로필 이름/사진은 profiles 테이블 값을 우선 사용 (재로그인 시에도 유지)
+  const hotSpots = useMemo(() => {
+    const places = placesFromDb
+    if (!places.length) return []
+
+    const vibeIdToLabel = {
+      verybusy: '🔥 Very Busy',
+      busy: '⏱️ Busy',
+      nowait: '✅ No Wait',
+      quiet: '🟢 Quiet',
+      soldout: '⚠️ Sold Out / Closed',
+    }
+    const getVibeLabel = (vibeId) => vibeIdToLabel[vibeId] || '🟢 Quiet'
+
+    const placeStats = {}
+    vibePosts.forEach((post) => {
+      const placeName = post.placeName || post.place_name
+      if (!placeName) return
+
+      if (!placeStats[placeName]) {
+        placeStats[placeName] = {
+          count: 0,
+          latestTimestamp: null,
+          latestVibe: null,
+        }
+      }
+
+      placeStats[placeName].count++
+
+      const postTime = post.timestamp
+        ? new Date(post.timestamp).getTime()
+        : (post.metadata?.capturedAt
+            ? new Date(post.metadata.capturedAt).getTime()
+            : 0)
+
+      if (
+        !placeStats[placeName].latestTimestamp ||
+        postTime > placeStats[placeName].latestTimestamp
+      ) {
+        placeStats[placeName].latestTimestamp = postTime
+        placeStats[placeName].latestVibe = post.vibe || null
+      }
+    })
+
+    let formattedPlaces = places.map((place) => {
+      const stats = placeStats[place.name]
+      const vibeLabel = stats?.latestVibe
+        ? getVibeLabel(stats.latestVibe)
+        : (place.status || '🟢 Quiet')
+      return {
+        id: place.id,
+        name: place.name,
+        nameEn: place.nameEn || place.name,
+        type: place.type || 'other',
+        status: vibeLabel,
+        wait: place.wait || 'Quiet',
+        lat: place.lat,
+        lng: place.lng,
+        thumbnail_url: place.thumbnail_url,
+        description: place.description,
+        description_en: place.description_en,
+        created_at: place.created_at ? new Date(place.created_at) : null,
+        display_start_date: place.display_start_date,
+        display_end_date: place.display_end_date,
+        display_periods: place.display_periods,
+        displayStatus: place.displayStatus || 'active',
+        info_url: place.info_url,
+        phone: place.phone,
+        hashtags: place.hashtags || [],
+        viewsCount: place.viewsCount || 0,
+        pickCount: place.pickCount || 0,
+        commentCount: place.commentCount || 0,
+        latestCommentAt: place.latestCommentAt ? new Date(place.latestCommentAt) : null,
+      }
+    })
+
+    if (userLocation) {
+      formattedPlaces = formattedPlaces
+        .map((place) => {
+          if (place.lat && place.lng) {
+            const distance = calculateDistance(
+              userLocation.lat,
+              userLocation.lng,
+              place.lat,
+              place.lng
+            )
+            return { ...place, distance }
+          }
+          return place
+        })
+        .sort((a, b) => {
+          if (a.distance !== undefined && b.distance !== undefined) {
+            return a.distance - b.distance
+          }
+          if (a.distance !== undefined) return -1
+          if (b.distance !== undefined) return 1
+          return 0
+        })
+    } else {
+      formattedPlaces = formattedPlaces
+        .map((place) => {
+          const statsForPlace = placeStats[place.name] || { count: 0, latestTimestamp: 0 }
+          return {
+            ...place,
+            postCount: statsForPlace.count,
+            latestPostTime: statsForPlace.latestTimestamp,
+          }
+        })
+        .sort((a, b) => {
+          if (a.postCount !== b.postCount) {
+            return b.postCount - a.postCount
+          }
+          if (a.latestPostTime !== b.latestPostTime) {
+            return (b.latestPostTime || 0) - (a.latestPostTime || 0)
+          }
+          return a.name.localeCompare(b.name)
+        })
+    }
+
+    return formattedPlaces
+  }, [placesFromDb, vibePosts, userLocation])
+
+  // 프로필 화면 진입 시 names/avatar는 profiles 테이블 기준으로 동기화 (TOKEN_REFRESHED 등으로 구글 메타에 덮인 경우 복구)
   useEffect(() => {
     const syncProfileFromDb = async () => {
-      if (!user?.id) return
+      if (!user?.id || currentView !== 'my') return
       try {
         const profile = await db.getUserProfile(user.id)
         if (!profile) return
@@ -848,10 +862,16 @@ function App() {
       }
     }
     syncProfileFromDb()
-  }, [user?.id])
+  }, [user?.id, currentView])
 
   // 사용자 세션 확인 및 인증 상태 관리
   useEffect(() => {
+    let disposed = false
+    const safeSetUser = (next) => {
+      if (disposed) return
+      setUser(next)
+    }
+
     // 세션에서 사용자 정보 추출하는 헬퍼 함수
     const extractUserFromSession = (session) => {
       if (!session?.user) return null
@@ -863,179 +883,136 @@ function App() {
       }
     }
 
-    // 세션 확인 및 사용자 상태 업데이트
-    const checkSession = async () => {
+    // 세션 메타 + profiles 단일 병합 (새로고침 시 구글만 잠깐 노출되거나 레이스 나는 것 방지)
+    const mergeSessionUserWithProfile = async (session) => {
+      const base = extractUserFromSession(session)
+      if (!base) return null
+      try {
+        const profile = await db.getUserProfile(base.id)
+        const name = profile?.full_name || base.name
+        const avatar =
+          profile?.avatar_url != null && String(profile.avatar_url).trim() !== ''
+            ? profile.avatar_url
+            : base.avatar
+        return { ...base, name, avatar }
+      } catch (e) {
+        console.error('mergeSessionUserWithProfile error:', e)
+        return base
+      }
+    }
+
+    const clearOAuthHashIfPresent = () => {
+      if (!window.location.hash) return
+      const hash = window.location.hash
+      if (hash.includes('access_token=') || hash.includes('refresh_token=') || hash.includes('error=')) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
+    }
+
+    const applySessionToUser = async (session, { allowNull = false } = {}) => {
+      if (!session?.user) {
+        if (allowNull) safeSetUser(null)
+        return
+      }
+      const base = extractUserFromSession(session)
+      if (!base) return
+      safeSetUser(base)
+      const merged = await mergeSessionUserWithProfile(session)
+      if (merged) safeSetUser(merged)
+    }
+
+    const loadInitialSession = async () => {
       try {
         const { session, error } = await auth.getSession()
         if (error) {
-          console.error('Session check error:', error)
+          console.error('Initial session load error:', error)
           return
         }
-        
+        // 초기 로드에서 null 세션은 확정 로그아웃으로 보지 않는다.
+        await applySessionToUser(session, { allowNull: false })
+        // 중요: session이 실제로 잡힌 경우에만 hash 제거.
+        // 그렇지 않으면 SDK가 URL hash(access_token) 파싱하기 전에 제거되어
+        // 새로고침 시 세션 영속화가 실패할 수 있다.
         if (session?.user) {
-          const userData = extractUserFromSession(session)
-          if (userData) {
-            setUser(userData)
-            console.log('User session found:', userData)
-            try {
-              const profile = await db.getUserProfile(userData.id)
-              if (profile) {
-                setUser((prev) => {
-                  if (!prev || prev.id !== userData.id) return prev
-                  return {
-                    ...prev,
-                    name: profile.full_name || prev.name,
-                    avatar: profile.avatar_url ?? prev.avatar,
-                  }
-                })
-              }
-            } catch (e) {
-              console.error('checkSession profile sync error:', e)
-            }
-          }
-        } else {
-          console.log('No active session')
-          setUser(null)
+          clearOAuthHashIfPresent()
         }
       } catch (error) {
-        console.error('Error checking session:', error)
+        console.error('Error loading initial session:', error)
       }
     }
 
-    // OAuth 리디렉션 후 hash 처리
-    const handleAuthCallback = async () => {
-      const hashParams = new URLSearchParams(window.location.hash.substring(1))
-      const accessToken = hashParams.get('access_token')
-      const error = hashParams.get('error')
-      const errorDescription = hashParams.get('error_description')
-      const errorCode = hashParams.get('error_code')
-      
-      // 모든 hash 파라미터 로그 (디버깅용)
-      if (window.location.hash) {
-        console.log('OAuth callback hash params:', {
-          hash: window.location.hash,
-          accessToken: accessToken ? 'present' : 'missing',
-          error: error || 'none',
-          errorDescription: errorDescription || 'none',
-          errorCode: errorCode || 'none',
-          allParams: Object.fromEntries(hashParams.entries())
-        })
-      }
-      
-      if (error) {
-        console.error('OAuth error details:', {
-          error,
-          errorDescription,
-          errorCode,
-          fullHash: window.location.hash,
-          currentUrl: window.location.href
-        })
-        
-        // 사용자에게 친화적인 에러 메시지 표시
-        alert(`로그인 오류가 발생했습니다.\n\n오류: ${error}\n${errorDescription ? `상세: ${errorDescription}` : ''}\n\n콘솔을 확인하여 자세한 정보를 확인하세요.`)
-        
-        window.history.replaceState(null, '', window.location.pathname)
-        return
-      }
-      
-      // hash에 access_token이 있거나, 리디렉션 직후라면 세션 확인
-      if (accessToken || window.location.hash) {
-        // Supabase가 세션을 설정할 시간을 주기 위해 약간 대기
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
-        // 세션 확인
-        await checkSession()
-        
-        // URL에서 hash 제거
-        if (window.location.hash) {
-          window.history.replaceState(null, '', window.location.pathname)
-        }
-      }
+    void loadInitialSession()
+
+    let authQueue = Promise.resolve()
+    const enqueueAuth = (task) => {
+      authQueue = authQueue.then(() => task()).catch((err) => {
+        console.error('Auth handler error:', err)
+      })
     }
 
-    // 초기 세션 확인 및 OAuth 콜백 처리
-    handleAuthCallback()
-    
-    // 추가로 세션 확인 (리디렉션 후 약간의 지연을 두고)
-    setTimeout(() => {
-      checkSession()
-    }, 500)
-
-    // 인증 상태 변경 리스너
+    // 인증 상태 변경 리스너 (비동기 핸들러는 GoTrue가 기다리지 않으므로 직렬 큐로 레이스 방지)
     const {
       data: { subscription },
-    } = auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session)
-      
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) {
-          const userData = extractUserFromSession(session)
-          if (userData) {
-            setUser(userData)
-            console.log('User signed in:', userData)
+    } = auth.onAuthStateChange((event, session) => {
+      enqueueAuth(async () => {
+        console.log('Auth state changed:', event, session)
 
-            // 로그인 직후 profiles 테이블 기준으로 이름/사진 다시 덮어쓰기
-            try {
-              const profile = await db.getUserProfile(userData.id)
-              if (profile) {
-                setUser((prev) => {
-                  if (!prev || prev.id !== userData.id) return prev
-                  return {
-                    ...prev,
-                    name: profile.full_name || prev.name,
-                    avatar: profile.avatar_url ?? prev.avatar,
-                  }
-                })
-              }
-            } catch (err) {
-              console.error('Failed to sync profile after sign-in:', err)
-            }
-            
-            // 로그인 성공 시 로그인 모달 닫고 Post Vibe 모달 열기
-            if (showLoginModal) {
-              setShowLoginModal(false)
+        if (event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            await applySessionToUser(session, { allowNull: false })
+            clearOAuthHashIfPresent()
+          }
+          return
+        }
+
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED') {
+          await applySessionToUser(session, { allowNull: false })
+          clearOAuthHashIfPresent()
+          if (event === 'SIGNED_IN' && showLoginModalRef.current) {
+            setShowLoginModal(false)
+            if (loginContextRef.current === 'post') {
               setIsModalOpen(true)
+            } else if (loginContextRef.current === 'pick') {
+              setCurrentView('my')
             }
+            setLoginContext(null)
           }
+          return
         }
-        
-        // URL에서 hash 제거
-        if (window.location.hash) {
-          window.history.replaceState(null, '', window.location.pathname)
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null)
-        console.log('User signed out')
-      } else if (session?.user) {
-        // 기타 이벤트(INITIAL_SESSION 등)에서도 세션이 있으면 사용자 정보 업데이트
-        const userData = extractUserFromSession(session)
-        if (userData) {
-          setUser(userData)
-          try {
-            const profile = await db.getUserProfile(userData.id)
-            if (profile) {
-              setUser((prev) => {
-                if (!prev || prev.id !== userData.id) return prev
-                return {
-                  ...prev,
-                  name: profile.full_name || prev.name,
-                  avatar: profile.avatar_url ?? prev.avatar,
-                }
-              })
+
+        if (event === 'SIGNED_OUT') {
+          const recheck = async () => {
+            const { session: latestSession, error: latestSessionError } = await auth.getSession()
+            if (latestSessionError) {
+              console.error('SIGNED_OUT session recheck error:', latestSessionError)
             }
-          } catch (e) {
-            console.error('otherAuthEvent profile sync error:', e)
+            return latestSession?.user ? latestSession : null
           }
+
+          const immediate = await recheck()
+          if (immediate) {
+            await applySessionToUser(immediate)
+            return
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          const delayed = await recheck()
+          if (delayed) {
+            await applySessionToUser(delayed)
+            return
+          }
+
+          await applySessionToUser(null, { allowNull: true })
+          console.log('User signed out')
         }
-      } else {
-        setUser(null)
-      }
+      })
     })
 
     return () => {
+      disposed = true
       subscription.unsubscribe()
     }
-  }, [showLoginModal])
+  }, [])
 
   // 카테고리 목록 로드
   useEffect(() => {
@@ -1129,17 +1106,6 @@ function App() {
       }
     }
   }, [currentView])
-
-  const handleRegionClick = (region) => {
-    if (region.active) {
-      setSelectedRegion(region)
-      setCurrentView('discover') // 최초 진입 시 Discover 화면으로
-      // localStorage에 저장 (새로고침 시 복원용)
-      localStorage.setItem('selectedRegionId', region.id)
-    } else {
-      alert('준비 중입니다')
-    }
-  }
 
   const handlePlaceClick = (placeId) => {
     const place = hotSpots.find((p) => p.id === placeId)
@@ -1363,6 +1329,7 @@ function App() {
   const handleOpenModal = () => {
     // 로그인 체크
     if (!user) {
+      setLoginContext('post')
       setShowLoginModal(true)
       return
     }
@@ -1379,12 +1346,18 @@ function App() {
   }
 
   const handleLogout = async () => {
-    const { error } = await auth.signOut()
-    if (error) {
-      console.error('Logout error:', error)
-    } else {
+    try {
+      const { error } = await auth.signOut({ scope: 'local' })
+      if (error) {
+        console.error('Logout error:', error)
+        alert(lang === 'ko' ? '로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.' : 'Sign out failed. Please try again.')
+        return
+      }
       setUser(null)
       setShowLoginModal(false)
+    } catch (e) {
+      console.error('Logout error:', e)
+      alert(lang === 'ko' ? '로그아웃에 실패했습니다.' : 'Sign out failed.')
     }
   }
 
@@ -2038,6 +2011,12 @@ function App() {
     }
   }
 
+  // /admin 경로(라우팅 설정 오류 등)에서 App이 마운트된 경우에도 Hook 순서를 유지하기 위해
+  // 모든 Hook 선언 뒤에서만 비렌더 처리합니다.
+  if (location.pathname.startsWith('/admin')) {
+    return null
+  }
+
   // Home View는 현재 사용하지 않음 (초기 진입 시 Discover로 바로 진입)
 
   // Discover View - 관리자 등록 팝업 전용
@@ -2094,43 +2073,11 @@ function App() {
       return 0
     })
 
-    const getFreshVibeLabel = (spot) => {
-      const now = new Date()
-      const postsForPlace = vibePosts.filter((p) => {
-        const spotNameEn = spot.name_en ?? spot.nameEn
-        return (
-          (p.placeId && p.placeId === spot.id) ||
-          (p.placeName && (p.placeName === spot.name || (spotNameEn && p.placeName === spotNameEn)))
-        )
-      })
-      if (postsForPlace.length === 0) return null
-      const latest = postsForPlace.reduce((acc, cur) => {
-        const t = cur.metadata?.capturedAt
-          ? new Date(cur.metadata.capturedAt).getTime()
-          : (cur.timestamp ? new Date(cur.timestamp).getTime() : 0)
-        const accT = acc.metadata?.capturedAt
-          ? new Date(acc.metadata.capturedAt).getTime()
-          : (acc.timestamp ? new Date(acc.timestamp).getTime() : 0)
-        return t > accT ? cur : acc
-      })
-      const capturedAt = latest.metadata?.capturedAt
-        ? new Date(latest.metadata.capturedAt)
-        : (latest.timestamp ? new Date(latest.timestamp) : null)
-      if (!capturedAt) return null
-      const diffMinutes = (now.getTime() - capturedAt.getTime()) / (1000 * 60)
-      if (diffMinutes > 30) return null // 30분 넘으면 혼잡도 숨김
-      const vibeInfo = getVibeInfo(latest.vibe)
-      return {
-        label: vibeInfo.label,
-        isLive: diffMinutes <= 10,
-      }
-    }
-
     return (
       <div className="min-h-screen bg-black text-white pb-24">
         {/* Header - 높이 지도 헤더와 동일 (96px) */}
         <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
-          <div className="min-h-[96px] max-w-[430px] mx-auto px-4 py-3 w-full">
+          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-2xl font-bold">
                 {I18N.discoverTitle[lang]}
@@ -2192,12 +2139,12 @@ function App() {
           ) : (
             sortedSpots.map((spot) => {
               const dday = getDDayBadgeLabel(spot)
-              const vibeFresh = getFreshVibeLabel(spot)
               const isPicked = pickedPlaceIds.includes(spot.id)
               return (
                 <div
                   key={spot.id}
                   onClick={() => {
+                    db.logPlaceView(spot.id)
                     setSelectedDiscoverSpot(spot)
                     setDiscoverDetailFrom('discover')
                     setCurrentView('discover-detail')
@@ -2239,15 +2186,20 @@ function App() {
                     )}
                   </div>
 
-                  {/* Info area under image: 장소명, D-day, 기간, 태그 */}
+                  {/* Info area under image: 장소명, D-day, 기간, 거리, 태그, 조회/댓글 */}
                   <div className="px-4 py-3 space-y-1.5">
                     <p className="text-sm font-semibold">
                       {lang === 'en' ? (spot.name_en ?? spot.nameEn ?? spot.name) : spot.name}
                     </p>
-                    {formatDisplayPeriodShortForSpot(spot) && (
-                      <p className="text-xs text-gray-400">
-                        {formatDisplayPeriodShortForSpot(spot)}
-                      </p>
+                    {(formatDisplayPeriodShortForSpot(spot) || spot.distance !== undefined) && (
+                      <div className="flex items-center justify-between text-xs text-gray-400">
+                        {formatDisplayPeriodShortForSpot(spot) && (
+                          <span>{formatDisplayPeriodShortForSpot(spot)}</span>
+                        )}
+                        {spot.distance !== undefined && (
+                          <span>{formatDistance(spot.distance)} away</span>
+                        )}
+                      </div>
                     )}
                     {/* Hashtags: 활성 태그만 라벨로 표시, 숨김/삭제된 태그는 미표시 */}
                     {Array.isArray(spot.hashtags) && spot.hashtags.length > 0 && (() => {
@@ -2274,7 +2226,16 @@ function App() {
                         </div>
                       )
                     })()}
-
+                    <div className="flex items-center gap-3 text-[11px] text-gray-400 mt-2">
+                      <span className="flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                        <span>{spot.pickCount ?? 0}</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        <span>{spot.commentCount ?? 0}</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
               )
@@ -2340,21 +2301,46 @@ function App() {
       }
     })()
 
-    const handleBack = () => {
+    const handleBack = async () => {
       setSelectedDiscoverSpot(null)
       const from = discoverDetailFrom
       setDiscoverDetailFrom(null)
-      if (from === 'home') setCurrentView('map')
-      else if (from === 'my') setCurrentView('my')
-      else setCurrentView('discover')
+      if (from === 'home') {
+        setCurrentView('map')
+      } else if (from === 'my') {
+        setCurrentView('my')
+      } else {
+        try {
+          const [places, admission, benefit, amenity, content] = await Promise.all([
+            db.getPlaces(),
+            getCommonCodes('place_tag_admission', false),
+            getCommonCodes('place_tag_benefit', false),
+            getCommonCodes('place_tag_amenity', false),
+            getCommonCodes('place_tag_content', false),
+          ])
+
+          const labelMap = {}
+          ;[...(admission || []), ...(benefit || []), ...(amenity || []), ...(content || [])].forEach((c) => {
+            if (!c.code_value) return
+            const ko = c.code_label_ko || c.code_label || ''
+            const en = c.code_label_en || ko
+            labelMap[c.code_value] = { ko, en }
+          })
+          setPlaceTagLabelMap(labelMap)
+          setPlacesFromDb(places)
+        } catch (err) {
+          console.error('Error reloading places on back from detail:', err)
+        }
+        setCurrentView('discover')
+      }
     }
 
     const backLabel =
       discoverDetailFrom === 'home'
-        ? (lang === 'ko' ? '지도로' : 'Back to Map')
+        ? (lang === 'ko' ? '뒤로' : 'Back to Map')
         : discoverDetailFrom === 'my'
-          ? (lang === 'ko' ? '마이로' : 'Back to My')
-          : (lang === 'ko' ? '디스커버로' : 'Back to Discover')
+          ? (lang === 'ko' ? '뒤로' : 'Back to My')
+          : (lang === 'ko' ? '뒤로' : 'Back to Discover')
 
     return (
       <div className="min-h-screen bg-black text-white pb-24">
@@ -2741,13 +2727,9 @@ function App() {
               className="flex -ml-3 w-auto"
               columnClassName="pl-3 bg-clip-padding"
             >
-              {filteredPosts.map((post, index) => {
+              {filteredPosts.map((post) => {
                 const vibeInfo = getVibeInfo(post.vibe)
-                
-                // 핀터레스트 스타일: 카드 높이 변형
-                const heightVariants = ['h-64', 'h-80', 'h-72', 'h-96', 'h-68', 'h-84']
-                const cardHeight = heightVariants[index % heightVariants.length]
-                
+
                 // Get main photo (first image) and count additional photos
                 const mainImage = post.images?.[0] || post.image
                 const additionalCount = post.images?.length > 1 ? post.images.length - 1 : 0
@@ -2878,6 +2860,7 @@ function App() {
           <LoginModal
             onClose={() => setShowLoginModal(false)}
             onLogin={handleGoogleLogin}
+            lang={lang}
           />
         )}
 
@@ -3271,7 +3254,6 @@ function App() {
           onClose={handleClosePostDetail}
           formatCapturedTime={formatCapturedTime}
           formatDate={formatDate}
-          getVibeInfo={getVibeInfo}
           postLikes={postLikes}
           onToggleLike={handleToggleLike}
           user={user}
@@ -3317,16 +3299,24 @@ function App() {
 
   // My View - 모바일 430px 통일
   if (currentView === 'my') {
+    const myTitle = lang === 'ko' ? '프로필' : 'Profile'
     return (
       <div className="min-h-screen bg-black text-white pb-24">
-        <div className="sticky top-0 min-h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
-          <div className="max-w-[430px] mx-auto px-4 py-3 w-full">
-            <h1 className="text-2xl font-bold">
-              My Profile
-            </h1>
-            <p className="text-sm text-gray-400 mt-1">
-              Your activity and settings
-            </p>
+        {/* Header - 높이·레이아웃 Discover와 동일 */}
+        <div className="sticky top-0 h-[96px] flex flex-col justify-center bg-black/95 backdrop-blur-sm z-20 border-b border-gray-800">
+          <div className="min-h-[96px] max-w-[430px] mx-auto px-4 py-3 w-full">
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-2xl font-bold">
+                {myTitle}
+              </h1>
+              <button
+                type="button"
+                onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')}
+                className="px-2 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:border-[#ADFF2F]/60 hover:text-[#ADFF2F] transition-colors"
+              >
+                {lang === 'ko' ? 'EN' : 'KO'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3363,10 +3353,11 @@ function App() {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={handleLogout}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-white font-semibold py-3 rounded-lg border border-gray-700 transition-colors"
                 >
-                  Sign Out
+                  {lang === 'ko' ? '로그아웃' : 'Sign Out'}
                 </button>
               </div>
 
@@ -3383,6 +3374,7 @@ function App() {
                         <div
                           key={spot.id}
                           onClick={() => {
+                            db.logPlaceView(spot.id)
                             setSelectedDiscoverSpot({ ...spot, name_en: spot.nameEn })
                             setDiscoverDetailFrom('my')
                             setCurrentView('discover-detail')
@@ -3403,6 +3395,16 @@ function App() {
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-sm truncate">
                               {lang === 'en' && spot.nameEn ? spot.nameEn : spot.name}
+                            </p>
+                            <p className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-2">
+                              <span className="flex items-center gap-0.5">
+                                <svg className="w-3.5 h-3.5 text-[#ADFF2F]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                <span>{spot.pickCount ?? 0}</span>
+                              </span>
+                              <span className="flex items-center gap-0.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                                <span>{spot.commentCount ?? 0}</span>
+                              </span>
                             </p>
                           </div>
                           <span className="text-[#ADFF2F]">★</span>
@@ -3469,7 +3471,11 @@ function App() {
           ) : (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">👤</div>
-              <p className="text-gray-400 mb-6">Please sign in to view your profile</p>
+              <p className="text-gray-400 mb-6">
+                {lang === 'ko'
+                  ? '로그인해서 가고 싶은 팝업을 모아보세요.'
+                  : 'Sign in to save and collect pop-ups you want to visit.'}
+              </p>
               <button
                 onClick={handleGoogleLogin}
                 className="px-6 py-3 bg-white text-black font-semibold rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-2 mx-auto"
@@ -3480,7 +3486,7 @@ function App() {
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
-                Sign in with Google
+                {lang === 'ko' ? 'Google 계정으로 로그인' : 'Sign in with Google'}
               </button>
             </div>
           )}
@@ -3596,7 +3602,7 @@ function App() {
 }
 
 // Post Detail View Component (전체 화면)
-function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibeInfo, postLikes, onToggleLike, user, onDeletePost }) {
+function PostDetailView({ post, onClose, formatCapturedTime, formatDate, postLikes, onToggleLike, user, onDeletePost }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
   const [touchStartY, setTouchStartY] = useState(null)
@@ -3737,7 +3743,7 @@ function PostDetailView({ post, onClose, formatCapturedTime, formatDate, getVibe
       }
     }
     loadUserProfile()
-  }, [post?.userId, post?.user])
+  }, [post])
   
   // 포스트 이미지 목록 (메인 + 추가 이미지)
   const allImages = post
@@ -4385,8 +4391,6 @@ function PostVibeModal({
     setIsDropdownOpen(false)
   }
 
-  const selectedPlaceLabel = selectedPlace || 'Select a place'
-
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -4913,7 +4917,14 @@ function DeleteConfirmModal({onClose, onConfirm}) {
 }
 
 // Login Modal Component
-function LoginModal({ onClose, onLogin }) {
+function LoginModal({ onClose, onLogin, lang }) {
+  const isKorean = lang === 'ko'
+  const title = isKorean ? '로그인이 필요합니다' : 'Sign In Required'
+  const description = isKorean
+    ? '로그인 후 마이페이지에서 픽한 장소와 활동을 관리할 수 있어요.'
+    : 'Please sign in to manage your picks and activity.'
+  const buttonLabel = isKorean ? 'Google 계정으로 로그인' : 'Sign in with Google'
+
   return (
     <>
       <div
@@ -4923,7 +4934,7 @@ function LoginModal({ onClose, onLogin }) {
       
       <div className="fixed left-4 right-4 bottom-4 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl z-50 p-6 md:p-8">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">Sign In Required</h2>
+          <h2 className="text-2xl font-bold">{title}</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
@@ -4936,7 +4947,7 @@ function LoginModal({ onClose, onLogin }) {
 
         <div className="space-y-4">
           <p className="text-gray-400">
-            Please sign in to share the vibe with the community.
+            {description}
           </p>
 
           <button
@@ -4949,12 +4960,8 @@ function LoginModal({ onClose, onLogin }) {
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
-            Sign in with Google
+            {buttonLabel}
           </button>
-
-          <p className="text-xs text-gray-500 text-center mt-4">
-            By signing in, you agree to share your vibe posts with the community.
-          </p>
         </div>
       </div>
     </>

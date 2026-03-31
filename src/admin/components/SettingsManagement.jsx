@@ -34,16 +34,6 @@ const SettingsManagement = () => {
     content: [],
   })
 
-  useEffect(() => {
-    if (activeTab === 'codes') {
-      if (selectedCodeType === 'place_category') {
-        loadCodes('place_category')
-      } else if (selectedCodeType === 'tags') {
-        loadAllTagCodes()
-      }
-    }
-  }, [activeTab, selectedCodeType])
-
   const loadCodes = async (codeType) => {
     const data = await getCommonCodes(codeType, true)
     setCodes(data)
@@ -63,6 +53,42 @@ const SettingsManagement = () => {
       content: content || [],
     })
   }
+
+  useEffect(() => {
+    if (activeTab !== 'codes') return
+    let cancelled = false
+
+    const run = async () => {
+      try {
+        if (selectedCodeType === 'place_category') {
+          const data = await getCommonCodes('place_category', true)
+          if (!cancelled) setCodes(data)
+        } else if (selectedCodeType === 'tags') {
+          const [admission, benefit, amenity, content] = await Promise.all([
+            getCommonCodes('place_tag_admission', true),
+            getCommonCodes('place_tag_benefit', true),
+            getCommonCodes('place_tag_amenity', true),
+            getCommonCodes('place_tag_content', true),
+          ])
+          if (!cancelled) {
+            setTagCodesByGroup({
+              admission: admission || [],
+              benefit: benefit || [],
+              amenity: amenity || [],
+              content: content || [],
+            })
+          }
+        }
+      } catch (e) {
+        if (!cancelled) console.error(e)
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, selectedCodeType])
 
   const handleReloadCodes = () => {
     if (selectedCodeType === 'place_category') loadCodes('place_category')
@@ -173,7 +199,7 @@ const PasswordChangeForm = () => {
       } else {
         setError(result.error || '비밀번호 변경에 실패했습니다.')
       }
-    } catch (err) {
+    } catch {
       setError('오류가 발생했습니다. 다시 시도해주세요.')
     } finally {
       setIsLoading(false)
@@ -369,8 +395,6 @@ const TagGroupsManagement = ({ tagCodesByGroup, onReload }) => {
 const CommonCodesManagement = ({ codes, codeType, onReload }) => {
   const [showForm, setShowForm] = useState(false)
   const [editingCode, setEditingCode] = useState(null)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [codeToDelete, setCodeToDelete] = useState(null)
   const isPlaceTag = PLACE_TAG_TYPES.includes(codeType)
 
   const handleAddNew = () => {

@@ -1,5 +1,13 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+
+function userDisplayName(profile) {
+  const name = (profile?.full_name || '').trim()
+  if (name) return name
+  const email = (profile?.email || '').trim()
+  if (!email) return '이름 없음'
+  return email.split('@')[0] || '이름 없음'
+}
 
 const UsersManagement = () => {
   const [users, setUsers] = useState([])
@@ -11,10 +19,6 @@ const UsersManagement = () => {
   useEffect(() => {
     loadUsers()
   }, [])
-
-  useEffect(() => {
-    filterUsers()
-  }, [users, searchQuery])
 
   const formatDateTime = (ts) => {
     if (!ts) return '-'
@@ -29,14 +33,6 @@ const UsersManagement = () => {
     } catch {
       return '-'
     }
-  }
-
-  const displayName = (profile) => {
-    const name = (profile?.full_name || '').trim()
-    if (name) return name
-    const email = (profile?.email || '').trim()
-    if (!email) return '이름 없음'
-    return email.split('@')[0] || '이름 없음'
   }
 
   const loadUsers = async () => {
@@ -108,7 +104,7 @@ const UsersManagement = () => {
     }
   }
 
-  const filterUsers = () => {
+  const filterUsers = useCallback(() => {
     if (!searchQuery.trim()) {
       setFilteredUsers(users)
       return
@@ -116,11 +112,15 @@ const UsersManagement = () => {
 
     const query = searchQuery.toLowerCase()
     const filtered = users.filter(user =>
-      displayName(user).toLowerCase().includes(query) ||
+      userDisplayName(user).toLowerCase().includes(query) ||
       user.email?.toLowerCase().includes(query)
     )
     setFilteredUsers(filtered)
-  }
+  }, [users, searchQuery])
+
+  useEffect(() => {
+    filterUsers()
+  }, [filterUsers])
 
   const loadUserDetails = async (userId) => {
     try {
@@ -183,7 +183,7 @@ const UsersManagement = () => {
 
   const selectedUserTitle = useMemo(() => {
     if (!selectedUser) return ''
-    return displayName(selectedUser) || selectedUser.email
+    return userDisplayName(selectedUser) || selectedUser.email
   }, [selectedUser])
 
   if (isLoading) {
@@ -348,11 +348,11 @@ const UsersManagement = () => {
                       <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover border border-gray-700 flex-shrink-0" />
                     ) : (
                       <div className="w-9 h-9 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-xs text-gray-400 flex-shrink-0">
-                        {(displayName(user).charAt(0) || '?').toUpperCase()}
+                        {(userDisplayName(user).charAt(0) || '?').toUpperCase()}
                       </div>
                     )}
                     <div className="min-w-0">
-                      <p className="font-medium truncate">{displayName(user)}</p>
+                      <p className="font-medium truncate">{userDisplayName(user)}</p>
                       <p className="text-sm text-gray-400 truncate">{user.email}</p>
                     </div>
                   </div>

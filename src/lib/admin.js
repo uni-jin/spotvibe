@@ -86,7 +86,7 @@ export const verifyAdminToken = async (token) => {
     }
 
     return { valid: true, admin: { id: data.id, username: data.username } }
-  } catch (error) {
+  } catch {
     return { valid: false }
   }
 }
@@ -385,6 +385,23 @@ export const getAdminPlaces = async () => {
       console.error('Error aggregating place picks for admin:', err)
     }
 
+    // 조회수 집계 (place_view_stats)
+    const viewsByPlace = {}
+    try {
+      const { data: viewStats, error: viewError } = await supabase
+        .from('place_view_stats')
+        .select('place_id, view_count')
+        .in('place_id', placeIds)
+
+      if (!viewError && Array.isArray(viewStats)) {
+        viewStats.forEach((row) => {
+          viewsByPlace[row.place_id] = row.view_count ?? 0
+        })
+      }
+    } catch (err) {
+      console.error('Error aggregating place views for admin:', err)
+    }
+
     // Get admin usernames for created_by (if exists)
     const adminIds = [...new Set(places.map(p => p.created_by).filter(Boolean))]
     let adminMap = {}
@@ -427,6 +444,7 @@ export const getAdminPlaces = async () => {
 
       const commentCount = commentsByPlace[place.id] || 0
       const pickCount = picksByPlace[place.id] || 0
+      const viewCount = viewsByPlace[place.id] ?? 0
 
       return {
         ...place,
@@ -438,6 +456,7 @@ export const getAdminPlaces = async () => {
         postCount: placePosts.length,
         commentCount,
         pickCount,
+        viewCount,
         createdByUsername: place.created_by ? adminMap[place.created_by] : null
       }
     })
@@ -676,7 +695,7 @@ export const deletePlace = async (placeId) => {
     }
 
     // Use SECURITY DEFINER function to bypass RLS
-    const { data, error } = await supabase.rpc('admin_delete_place', {
+    const { error } = await supabase.rpc('admin_delete_place', {
       p_id: placeId
     })
 

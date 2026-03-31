@@ -3,12 +3,24 @@ import { getDisplayStatusFromPeriods } from './kstDateUtils.js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// 조회수 기능 on/off 플래그 (기본값: false)
+const enablePlaceViews = import.meta.env.VITE_ENABLE_PLACE_VIEWS === 'true'
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+})
+
+// 조회수 로깅/집계가 일시적으로 깨졌을 때 앱 전체가 영향을 받지 않도록
+// 런타임에서 비활성화할 수 있는 플래그
+let placeViewStatsEnabled = enablePlaceViews
 
 function getOAuthRedirectUrl() {
   const configuredRedirectUrl = import.meta.env.VITE_OAUTH_REDIRECT_URL
@@ -53,9 +65,9 @@ export const auth = {
     return { data, error }
   },
 
-  // Sign out
-  async signOut() {
-    const { error } = await supabase.auth.signOut()
+  // Sign out (local: 이 기기 스토리지 세션만 제거)
+  async signOut(options = { scope: 'local' }) {
+    const { error } = await supabase.auth.signOut(options)
     return { error }
   },
 
@@ -162,6 +174,31 @@ export const db = {
     if (!placesData || placesData.length === 0) return []
 
     const placeIds = placesData.map((p) => p.id)
+
+    // 조회수 집계 (place_view_stats 뷰 사용) — 실패해도 장소 목록은 계속 노출
+    let viewStatsByPlace = {}
+    if (placeViewStatsEnabled) {
+      try {
+        const { data: viewStats, error: viewStatsError } = await supabase
+          .from('place_view_stats')
+          .select('place_id, view_count')
+          .in('place_id', placeIds)
+
+        if (viewStatsError) {
+          // 뷰가 없거나 권한 문제가 있으면, 런타임에서 일시적으로 비활성화
+          console.error('Error fetching place view stats:', viewStatsError)
+          placeViewStatsEnabled = false
+        } else if (Array.isArray(viewStats)) {
+          viewStats.forEach((row) => {
+            viewStatsByPlace[row.place_id] = row.view_count ?? 0
+          })
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching place view stats:', err)
+        placeViewStatsEnabled = false
+        viewStatsByPlace = {}
+      }
+    }
     const { data: periodsRows } = await supabase
       .from('place_display_periods')
       .select('place_id, display_start_date, display_end_date, display_order')
@@ -208,6 +245,25 @@ export const db = {
       commentStatsByPlace = {}
     }
 
+    // 픽 수 집계 (user_place_picks)
+    let pickCountByPlace = {}
+    try {
+      const { data: picksData, error: picksError } = await supabase
+        .from('user_place_picks')
+        .select('place_id')
+        .in('place_id', placeIds)
+
+      if (!picksError && Array.isArray(picksData)) {
+        picksData.forEach((row) => {
+          if (!row.place_id) return
+          pickCountByPlace[row.place_id] = (pickCountByPlace[row.place_id] || 0) + 1
+        })
+      }
+    } catch (err) {
+      console.error('Error aggregating place picks:', err)
+      pickCountByPlace = {}
+    }
+
     // 복수 노출기간 또는 단일 기간 기준 노출 상태
     const withStatus = placesData.map((place) => {
       const display_periods = periodsByPlace[place.id] || null
@@ -217,7 +273,8 @@ export const db = {
         place.display_end_date
       )
       const commentStat = commentStatsByPlace[place.id] || { count: 0, latestCommentAt: null }
-      return { place, display_periods, displayStatus: status, commentStat }
+      const pickCount = pickCountByPlace[place.id] || 0
+      return { place, display_periods, displayStatus: status, commentStat, pickCount }
     })
 
     // Hot Spots Now에는 진행중/시작 예정(및 무제한)만 노출, 종료는 제외
@@ -228,7 +285,7 @@ export const db = {
         item.displayStatus === 'unlimited'
     )
 
-    return filtered.map(({ place, display_periods, displayStatus, commentStat }) => {
+    return filtered.map(({ place, display_periods, displayStatus, commentStat, pickCount }) => {
       // description 컬럼: plain string 또는 {"ko","en"} JSON 모두 지원
       let descKo = place.description || ''
       let descEn = null
@@ -265,6 +322,8 @@ export const db = {
         phone: place.phone,
         hashtags: place.hashtags || [],
         displayStatus,
+        viewsCount: viewStatsByPlace[place.id] || 0,
+        pickCount: pickCount || 0,
         commentCount: commentStat.count || 0,
         latestCommentAt: commentStat.latestCommentAt || null,
       }
@@ -376,6 +435,25 @@ export const db = {
     }
 
     return data
+  },
+
+  // Log a place view: 카드 선택 시마다 단순 +1
+  async logPlaceView(placeId) {
+    if (!placeViewStatsEnabled) return
+    if (!placeId) return
+    try {
+      const { error } = await supabase
+        .from('place_views')
+        .insert({ place_id: placeId })
+
+      if (error) {
+        console.error('Error logging place view:', error)
+        placeViewStatsEnabled = false
+      }
+    } catch (err) {
+      console.error('Unexpected error logging place view:', err)
+      placeViewStatsEnabled = false
+    }
   },
 
   // Place comments
