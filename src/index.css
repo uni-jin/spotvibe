@@ -147,6 +147,9 @@ body {
   0%, 100% {
     opacity: 1;
   }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Masonry Layout Support */
@@ -174,8 +177,5 @@ body {
   
   .masonry-item {
     display: block;
-  }
-  50% {
-    opacity: .5;
   }
 }

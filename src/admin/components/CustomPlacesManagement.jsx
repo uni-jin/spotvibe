@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getCustomPlaceNames, promoteCustomPlace, getCommonCodes } from '../../lib/admin'
 import { db } from '../../lib/supabase'
 import imageCompression from 'browser-image-compression'
@@ -18,20 +18,12 @@ const CustomPlacesManagement = () => {
   const [showPromoteForm, setShowPromoteForm] = useState(false)
   const [placeToPromote, setPlaceToPromote] = useState(null)
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
-    await Promise.all([loadCustomPlaces(), loadCategories()])
-  }
-
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     const data = await getCommonCodes('place_category')
     setCategories(data)
-  }
+  }, [])
 
-  const loadCustomPlaces = async () => {
+  const loadCustomPlaces = useCallback(async () => {
     try {
       setIsLoading(true)
       const data = await getCustomPlaceNames()
@@ -41,7 +33,15 @@ const CustomPlacesManagement = () => {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
+
+  const loadData = useCallback(async () => {
+    await Promise.all([loadCustomPlaces(), loadCategories()])
+  }, [loadCustomPlaces, loadCategories])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
 
   if (isLoading) {
     return (
@@ -212,7 +212,7 @@ const PromotePlaceForm = ({ customPlace, categories, onClose, onSuccess }) => {
         const baseName = (formData.name || formData.name_en || customPlace?.place_name || 'place').trim()
         const safeName = baseName
           .replace(/\s+/g, '_')
-          .replace(/[^\w\-]+/g, '')
+          .replace(/[^\w-]+/g, '')
           .slice(0, 60) || 'place'
         const thumbnailPath = `places/${timestamp}_${safeName}.${fileExtension}`
 

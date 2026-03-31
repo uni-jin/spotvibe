@@ -9,7 +9,7 @@ import SettingsManagement from './components/SettingsManagement'
 const AdminDashboard = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentMenu, setCurrentMenu] = useState('places')
-  const [admin, setAdmin] = useState(null)
+  const [, setAdmin] = useState(null)
   const [menuResetTrigger, setMenuResetTrigger] = useState(0)
 
   useEffect(() => {
@@ -33,7 +33,7 @@ const AdminDashboard = () => {
     checkAuth()
   }, [])
 
-  const handleLoginSuccess = (token) => {
+  const handleLoginSuccess = () => {
     setIsAuthenticated(true)
     // Admin data will be loaded in AdminLayout
   }

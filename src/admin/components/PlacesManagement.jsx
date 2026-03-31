@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { getAdminPlaces, getCommonCodes, savePlace, deletePlace } from '../../lib/admin'
 import { db } from '../../lib/supabase'
-import { getDisplayStatusFromPeriods, getDisplayPeriodForAdminList, getKSTDateKey, kstDateTimeToDbString, utcToKstDateTimeString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
+import { getDisplayStatusFromPeriods, getDisplayPeriodForAdminList, getKSTDateKey, kstDateTimeToDbString, formatUtcAsKstDisplay } from '../../lib/kstDateUtils.js'
 import imageCompression from 'browser-image-compression'
 import { useNaverMapSdk } from '../../lib/useNaverMapSdk'
 
@@ -11,6 +11,7 @@ function AdminNaverMap({ lat, lng, onChangeLatLng }) {
   const markerRef = useRef(null)
   const sdkReady = useNaverMapSdk()
 
+  // 지도·마커는 SDK 준비 시 1회 생성; lat/lng는 아래 effect에서 마커만 이동
   useEffect(() => {
     if (!sdkReady || !window.naver?.maps || !mapRef.current || mapInstanceRef.current) return
 
@@ -33,7 +34,7 @@ function AdminNaverMap({ lat, lng, onChangeLatLng }) {
       marker.setPosition(pos)
       onChangeLatLng(pos.y.toString(), pos.x.toString())
     })
-  }, [sdkReady])
+  }, [sdkReady]) // eslint-disable-line react-hooks/exhaustive-deps -- lat/lng/onChangeLatLng는 초기값만 사용·이후는 별도 effect
 
   useEffect(() => {
     const map = mapInstanceRef.current
@@ -86,10 +87,6 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     }
   }, [resetTrigger])
 
-  useEffect(() => {
-    filterPlaces()
-  }, [places, searchName, searchCategory, searchActive, searchDisplayStatus, searchDisplayStartDate, searchDisplayEndDate])
-
   const loadData = async () => {
     try {
       setIsLoading(true)
@@ -116,7 +113,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     }
   }
 
-  const filterPlaces = () => {
+  const filterPlaces = useCallback(() => {
     let filtered = [...places]
 
     // Filter by name
@@ -177,33 +174,19 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
     }
 
     setFilteredPlaces(filtered)
-  }
+  }, [
+    places,
+    searchName,
+    searchCategory,
+    searchActive,
+    searchDisplayStatus,
+    searchDisplayStartDate,
+    searchDisplayEndDate,
+  ])
 
-  const getVibeLabel = (vibe) => {
-    const vibeMap = {
-      'verybusy': '🔥 Very Busy',
-      'busy': '⏱️ Busy',
-      'nowait': '✅ No Wait',
-      'quiet': '🟢 Quiet',
-      'soldout': '❌ Sold Out'
-    }
-    return vibeMap[vibe] || vibe
-  }
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '-'
-    const date = new Date(dateString)
-    // Supabase stores timestamps in UTC (TIMESTAMP WITH TIME ZONE)
-    // Use toLocaleString with timeZone option for accurate KST conversion
-    return date.toLocaleString('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+  useEffect(() => {
+    filterPlaces()
+  }, [filterPlaces])
 
   const formatDateParts = (dateString) => {
     if (!dateString) return null
@@ -406,7 +389,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">장소명</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap">카테고리</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-32">픽 / 댓글</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">조회 / 픽 / 댓글</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-28">활성화</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-48">노출기간</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold whitespace-nowrap w-40">등록일</th>
@@ -418,6 +401,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                     filteredPlaces.map((place) => {
                       const category = categories.find(c => c.code_value === place.type)
                       const createdParts = formatDateParts(place.created_at)
+                      const viewCount = place.viewCount ?? 0
                       const pickCount = place.pickCount || 0
                       const commentCount = place.commentCount || 0
                       return (
@@ -429,7 +413,7 @@ const PlacesManagement = ({ resetTrigger = 0 }) => {
                             {formatCommonCodeLabel(category) || place.type || '-'}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap">
-                            {pickCount} / {commentCount}개
+                            {viewCount} / {pickCount} / {commentCount}개
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span
@@ -552,17 +536,17 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
   const [geoMessage, setGeoMessage] = useState('')
   
   // Map state
-  const [markerPosition, setMarkerPosition] = useState(
+  const [, setMarkerPosition] = useState(
     place?.lat && place?.lng ? [parseFloat(place.lat), parseFloat(place.lng)] : null
   )
-  const [mapCenter, setMapCenter] = useState(
+  const [, setMapCenter] = useState(
     place?.lat && place?.lng 
       ? [parseFloat(place.lat), parseFloat(place.lng)]
       : [37.5446, 127.0559] // 기본값: 성수동
   )
-  const [mapZoom, setMapZoom] = useState(place?.lat && place?.lng ? 16 : 13)
+  const [, setMapZoom] = useState(place?.lat && place?.lng ? 16 : 13)
 
-  // 편집 시 좌표만 있고 주소가 비어 있으면 역지오코딩으로 주소 자동 채우기
+  // 편집 시 좌표만 있고 주소가 비어 있으면 역지오코딩으로 주소 자동 채우기 (장소 단위로 1회)
   useEffect(() => {
     if (!place?.lat || !place?.lng || place?.address) return
     const latNum = parseFloat(place.lat)
@@ -587,7 +571,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         }
       }
     )
-  }, [place?.id])
+  }, [place?.id]) // eslint-disable-line react-hooks/exhaustive-deps -- place.id 변경 시에만 1회 보충 지오코딩
 
   /** 핀 위치(위경도)로 역지오코딩 후 도로명 주소를 formData.address에 자동 반영 */
   const updateAddressFromLatLng = (lat, lng) => {
@@ -843,7 +827,7 @@ const PlaceForm = ({ place, categories, tagGroups, onClose, onSuccess, onDeleteP
         const baseName = (formData.name_ko || formData.name_en || place?.name || 'place').trim()
         const safeName = baseName
           .replace(/\s+/g, '_')
-          .replace(/[^\w\-]+/g, '')
+          .replace(/[^\w-]+/g, '')
           .slice(0, 60) || 'place'
         const thumbnailPath = `places/${timestamp}_${safeName}.${fileExtension}`
 
